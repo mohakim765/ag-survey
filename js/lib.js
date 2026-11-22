@@ -137,16 +137,19 @@
         ds.push([{ date: day }, AREA_N(seed, t.a), t.grp || '', t.place, t.w.map(id => byId[id] ? byId[id].n : id).join(' + '), st, same.length, same.reduce((s, q) => s + (q.cap || 0), 0) || null, t.code || 'NA', t.cap || null, lv == null ? null : { v: lv, warn: lv < S.cfg.dieselMin }, x.byn || '', hhmm(x.t)]);
       }
     }
-    // chemicals: tank level per chemical on each well
-    const cr = [['Prod. Day', 'Area', 'Well', 'Well type', 'Chemical', 'Level %', 'Alarm below %', 'Technician', 'Time']];
+    // chemicals: tank level, refill time, drums on the well and consumption per chemical on each well
+    const cr = [['Prod. Day', 'Area', 'Well', 'Well type', 'Chemical', 'Level %', 'Alarm below %', 'Refill time', 'Drums', 'Consumption (L/day)', 'Technician', 'Time']];
     for (const day of days) {
       const C = S.days[day].c || {};
       for (const wid in C) {
         const w = byId[wid], x = C[wid]; if (!w || !sel.has(w.a)) continue;
-        for (const [code, v] of Object.entries(x.v || {})) { const lv = toNum(v); if (lv == null) continue; const mn = chemMin(S.cfg, code); cr.push([{ date: day }, AREA_N(seed, w.a), w.n, w.t, CHEM_N[code] || code, { v: lv, warn: lv < mn }, mn, x.byn || '', x.t ? hhmm(x.t) : '']); }
+        const codes = [...new Set(['v', 'f', 'dr', 'rt'].flatMap(p => Object.keys(x[p] || {})))];
+        for (const code of codes) { const g = p => (x[p] || {})[code] ?? '', lv = toNum(g('v')), mn = chemMin(S.cfg, code), dr = toNum(g('dr')), rt = toNum(g('rt'));
+          if (lv == null && !g('f') && dr == null && rt == null) continue;
+          cr.push([{ date: day }, AREA_N(seed, w.a), w.n, w.t, CHEM_N[code] || code, lv == null ? null : { v: lv, warn: lv < mn }, mn, g('f'), dr, rt, x.byn || '', x.t ? hhmm(x.t) : '']); }
       }
     }
-    if (cr.length > 1) sheets.push({ name: 'Chemicals', rows: cr, widths: [12, 14, 18, 8, 24, 9, 11, 16, 8] });
+    if (cr.length > 1) sheets.push({ name: 'Chemicals', rows: cr, widths: [12, 14, 18, 8, 24, 9, 11, 10, 8, 12, 16, 8] });
     if (ds.length > 1) sheets.push({ name: 'Diesel', rows: ds, widths: [12, 14, 18, 18, 20, 12, 7, 10, 10, 11, 9, 16, 8] });
     // downtime
     const [a0] = dayWindow(from, h), [, b0] = dayWindow(to, h);

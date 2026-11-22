@@ -357,3 +357,52 @@ svg.map .mlab{font:800 32px system-ui,sans-serif;fill:#1d4ed8;text-anchor:middle
 .banner.inst{display:flex;align-items:center;gap:8px}
 .banner.inst span{flex:1}
 @media (min-width:820px){.tabs{justify-content:center}.tabs button{max-width:190px}}
+/* v0.6.8: accounts, the well screen saves by itself, chemicals, the distribution card */
+.btn .nbdg,.banner .nbdg{position:static;margin-inline-start:4px}
+.tag.new{background:var(--bad);border-color:var(--bad);color:#fff}
+.wrap.auth{padding-bottom:30px}
+.wrap.auth .linkbtn.center{border:0;margin-top:4px}
+.req{padding:10px 14px;border-top:1px solid var(--rule)}
+.sec h3+.req{border-top:0}
+.req .nm small{display:block;color:var(--mute);font-size:12px;font-weight:400;margin-top:2px}
+.req .nm s{color:var(--bad)}
+.req .btns{margin-top:8px}
+.bigcode{font-size:44px;font-weight:800;letter-spacing:12px;text-align:center;color:var(--pen);margin:8px 0;font-variant-numeric:tabular-nums}
+button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:15px;font-weight:700;cursor:pointer}
+.fbody .wrap{padding-bottom:calc(28px + env(safe-area-inset-bottom))}
+.fsv{margin-inline-start:auto;display:inline-flex;align-items:center;gap:4px;font-size:14px;font-weight:700;color:#9be7b4;opacity:0;transition:opacity .25s;flex:none}
+.fsv.on{opacity:1}
+.fsv svg{width:18px;height:18px}
+.autosv{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:16px}
+.autosv svg{width:16px;height:16px;color:var(--ok)}
+.chwn{margin:0;padding:8px 14px 0;font-weight:800;border-top:1.5px solid var(--grid)}
+.sec h3+.chwn{border-top:0}
+.chb{border-top:1px solid var(--rule)}
+.chwn+.chb{border-top:0}
+.chb .irow{border-top:0}
+.chx{padding:0 14px 12px;display:grid;gap:10px}
+.chf .lab{font-size:13px}
+.chf .in{min-height:46px;text-align:center;font-weight:700;color:var(--pen);font-size:18px}
+.chf .in::placeholder{color:var(--mute);font-weight:400;font-size:14px}
+.chtw{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chtw .tin{flex:1}
+.chtw .linkbtn{width:auto;margin:0;padding:0 14px}
+.tin .in.bad{border-color:var(--bad);background:var(--bad2);color:var(--bad)}
+.chf .in.bad{border-color:var(--bad);background:var(--bad2);color:var(--bad)}
+.scard{display:flex;flex-direction:column;align-items:stretch;gap:8px;width:100%;padding:12px 14px;text-align:start;font:inherit;color:var(--ink);cursor:pointer}
+.sch{display:flex;align-items:center;gap:8px;font-size:16px}
+.sch small{color:var(--mute);font-weight:600;font-size:13px}
+.sch .chev{margin-inline-start:auto;color:var(--mute);display:inline-flex}
+.sch .chev svg{width:20px;height:20px;transform:scaleX(-1)}
+.scl{display:flex;flex-wrap:wrap;gap:6px}
+.scg{border:1px solid var(--rule);border-radius:999px;padding:3px 10px;font-size:14px;color:var(--mute)}
+.scg b{color:var(--ink);font-weight:700}
+.scme{font-size:14px;color:var(--pen)}
+.urow{display:flex;flex-direction:column;gap:8px;padding:10px 14px;border-top:1px solid var(--rule)}
+.sec h3+.urow{border-top:0}
+.urow .nm small{display:block;color:var(--mute);font-size:12px;margin-top:2px}
+.uact{display:flex;gap:8px;align-items:center}
+.uact select{flex:1;min-height:42px}
+.urole{flex:1;color:var(--mute);font-size:14px;font-weight:600}
+.chtw .tin .seg.ampm{flex-basis:100%}
+.chnow{min-height:46px;border-style:dashed;border-color:var(--pen);color:var(--pen)}

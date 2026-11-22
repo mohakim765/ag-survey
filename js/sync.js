@@ -10,6 +10,7 @@
   const strip = d => { if (!d || typeof d !== 'object' || Array.isArray(d)) return d; const o = {}; for (const k in d) if (k[0] !== '_') o[k] = d[k]; return o; };
   const DAY_KEYS = { r: 'r', d: 'd', p: 'p', c: 'c' };
   const PLAN = { pm: 'maint', pw: 'work', pt: 'tasks' };
+  const UMAP = { uc: 'ucode', ur: 'ureq', uq: 'uprof' };   // codes from the admin, password requests, requests to change a name / number
 
   function planObj(day, aid) { const s = S(); s.plan = s.plan || {}; return s.plan[day + '|' + aid] || (s.plan[day + '|' + aid] = { staff: [], maint: [], work: [], tasks: [] }); }
   function findFromEnd(arr, id) { for (let i = arr.length - 1; i >= 0; i--) if (arr[i] && arr[i].id === id) return i; return -1; }
@@ -25,6 +26,7 @@
     if (p === 'nw') return s.cfg.newWells && s.cfg.newWells[a] ? clone(s.cfg.newWells[a]) : null;
     if (p === 'cs') return { prodDayStart: s.cfg.prodDayStart, dieselMin: s.cfg.dieselMin, gasDiffPct: s.cfg.gasDiffPct, chemMin: clone(s.cfg.chemMin || {}) };
     if (p === 'u') return s.users[a] ? clone(s.users[a]) : null;
+    if (UMAP[p]) { const m = s[UMAP[p]]; return m && m[a] ? clone(m[a]) : null; }
     if (p === 'ux') return s.gone && s.gone[a] ? { del: 1 } : null;
     if (p === 'sd') return C.seedPart ? C.seedPart(a, +b) : null;   // the wells' data, in parts, for the web version
     if (p === 'pj') { const L = s.jobs && s.jobs[a]; if (!L) return null; const i = findFromEnd(L, b); return i < 0 ? null : clone(L[i]); }
@@ -50,6 +52,7 @@
     if (p === 'nw') { s.cfg.newWells = s.cfg.newWells || {}; if (d) s.cfg.newWells[a] = d; else delete s.cfg.newWells[a]; return; }
     if (p === 'cs') { if (d) { for (const f of ['prodDayStart', 'dieselMin', 'gasDiffPct']) if (typeof d[f] === 'number') s.cfg[f] = d[f]; if (d.chemMin && typeof d.chemMin === 'object') s.cfg.chemMin = d.chemMin; } return; }
     if (p === 'u') { if (d && !(s.gone && s.gone[root.L.uhash(a)])) s.users[a] = d; return; }   // a removed person never comes back
+    if (UMAP[p]) { const m = s[UMAP[p]] || (s[UMAP[p]] = {}); if (d && !(s.gone && s.gone[root.L.uhash(a)])) m[a] = d; else delete m[a]; return; }
     if (p === 'sd') { if (C.onSeed) C.onSeed(a, +b, d); return; }
     if (p === 'ux') { if (d && d.del) { s.gone = s.gone || {}; s.gone[a] = 1; if (C.onGone) C.onGone(a); } return; }
     if (p === 'pj') { s.jobs = s.jobs || {}; return upsert(s.jobs[a] || (s.jobs[a] = []), b); }
@@ -74,7 +77,8 @@
     for (const id in (s.cfg.newWells || {})) put('nw|' + id, s.cfg.newWells[id].at);
     // settings: only when this phone changed them, so a new phone doesn't push the defaults over the admin's values
     const y = st(), D = root.SEED || {}; if (y.mt.cs || ['prodDayStart', 'dieselMin', 'gasDiffPct'].some(f => D[f] != null && s.cfg[f] !== D[f]) || Object.keys(s.cfg.chemMin || {}).length) put('cs');
-    for (const u in s.users) put('u|' + u, s.users[u].at);
+    for (const u in s.users) if (!s.users[u]._seed) put('u|' + u, s.users[u].at);   // the admin account from the seed is on every phone already
+    for (const p in UMAP) for (const u in s[UMAP[p]] || {}) put(p + '|' + u, s[UMAP[p]][u].t);
     for (const h in s.gone || {}) put('ux|' + h);
     for (const x of s.audit) { if (!x.id) x.id = 'a' + x.ts.toString(36) + Math.random().toString(36).slice(2, 6); put('a|' + x.id, x.ts); }
   }
@@ -114,9 +118,12 @@
   }
   async function doRun(manual) {
     const y = st(); if (!y || !url()) return { ok: false, err: 'مش متربط بالشيت' };
+    // the app is in the background on Android: the phone's own background job sends the changes (when there is a network)
+    if (!manual && typeof document !== 'undefined' && document.hidden && C.bgOn && C.bgOn()) return { ok: false, err: '' };
     running = true; lastRun = Date.now(); clearTimeout(timer);
     let got = 0, sent = 0, cfgChanged = false, usersChanged = false;
     try {
+      if (C.before) await C.before();   // what the background job already sent is not sent again
       if (!y.seeded) seedAll();
       for (let loop = 0; loop < 40; loop++) {
         const keys = Object.keys(y.dirty).sort((a, b) => y.dirty[a] - y.dirty[b]).slice(0, 300);
@@ -124,7 +131,6 @@
         const res = await post({ key: key(), dev: y.dev, cursor: y.cursor, changes, app: C.version });
         for (const c of changes) if (y.dirty[c.k] === c.t) delete y.dirty[c.k];
         sent += changes.length;
-        if (typeof res.admin === 'string' && res.admin && S().admin !== res.admin) { S().admin = res.admin; usersChanged = true; }
         if (res.reset) { y.cursor = 0; seedAll(); continue; }
         for (const c of res.changes || []) {
           if (c.dev === y.dev) continue;
@@ -135,7 +141,7 @@
             if (!c.k.startsWith('a|')) y.mt[c.k] = c.t;
             if (pend && pend <= c.t) delete y.dirty[c.k];
             if (c.k.startsWith('cw|') || c.k.startsWith('nw|') || c.k === 'cs') cfgChanged = true;
-            if (c.k.startsWith('u|') || c.k.startsWith('ux|')) usersChanged = true;
+            if (/^u[xcrq]?\|/.test(c.k)) usersChanged = true;
           }
         }
         y.cursor = res.cursor;
@@ -144,7 +150,11 @@
       y.last = Date.now(); y.err = ''; y.net = false; prune();
       return { ok: true, got, sent };
     } catch (e) { y.err = e.message || String(e); y.net = !!e.net; return { ok: false, err: y.err }; }
-    finally { running = false; const m = manual || manualAsk; manualAsk = false; C.save(); C.onDone({ got, sent, cfgChanged, usersChanged, manual: m }); if (Object.keys(y.dirty).length && !y.err) schedule(3000); }
+    finally {
+      running = false; const m = manual || manualAsk; manualAsk = false; C.save(); C.onDone({ got, sent, cfgChanged, usersChanged, manual: m });
+      // still something to send: try again soon (no network: every 20 seconds, so it goes as soon as the network is back)
+      if (Object.keys(y.dirty).length) schedule(!y.err ? 3000 : y.net ? 20000 : 60000);
+    }
   }
   // forget modification times of old days (only recent days can still be edited)
   function prune() {
@@ -164,6 +174,16 @@
   }
   function setUrl(u) { st().url = (u || '').trim(); st().seeded = false; st().cursor = 0; C.save(); schedule(500); }
   function each(fn) { const ks = []; eachKey(k => ks.push(k)); for (const k of ks) fn(k); }
+  // for the phone's background job: the request the app would send now (the oldest changes first)
+  function outbox(max) {
+    const y = st(); if (!y || !url() || !y.seeded) return null;
+    const keys = Object.keys(y.dirty).sort((a, b) => y.dirty[a] - y.dirty[b]).slice(0, max || 1000); if (!keys.length) return null;
+    const changes = keys.map(k => ({ k, t: y.dirty[k], u: S().me || '', d: C.meta(k, get(k)) })), sent = {};
+    for (const c of changes) sent[c.k] = c.t;
+    return { url: url(), body: JSON.stringify({ key: key(), dev: y.dev, cursor: y.cursor, changes, app: C.version, bg: 1 }), keys: sent };
+  }
+  // the background job sent these: they are not waiting any more (unless they changed again since)
+  function sentBy(keys) { const y = st(); let n = 0; if (!y) return 0; for (const k in keys || {}) if (y.dirty[k] === keys[k]) { delete y.dirty[k]; n++; } if (n) { y.last = Date.now(); y.err = ''; y.net = false; } return n; }
   function forget(k) { const y = st(); if (y) { delete y.dirty[k]; delete y.mt[k]; } }
-  root.SYNC = { init, mark, run, status, setUrl, url, each, forget, _get: get, _set: set };
+  root.SYNC = { init, mark, run, status, setUrl, url, each, forget, outbox, sentBy, schedule, _get: get, _set: set };
 })(typeof self !== 'undefined' ? self : this);

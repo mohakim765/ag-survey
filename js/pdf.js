@@ -107,8 +107,9 @@
     const trow = tanks.filter(t => !t.w.length || t.w.some(id => ws.find(w => w.id === id))).map(t => { const x = D.d[t.id], v = x ? L.toNum(x.v) : null; return [t.place, t.code || 'NA', t.cap ? t.cap.toLocaleString('en') : '', v == null ? '' : { t: v + '%', warn: v < S.cfg.dieselMin }]; });
     if (trow.length) P.table('Diesel Tanks', [{ h: 'Place', w: 3 }, { h: 'Code', w: 1.4 }, { h: 'Capacity (L)', w: 1.5 }, { h: 'Level', w: 1.2 }], trow);
     const crow = [], C = D.c || {};
-    for (const w of ws) for (const code of (w.ch || [])) { const x = C[w.id], v = x && x.v ? L.toNum(x.v[code]) : null, mn = L.chemMin(S.cfg, code); crow.push([w.n, L.CHEM_N[code] || code, v == null ? '' : { t: v + '%', warn: v < mn }]); }
-    if (crow.length) P.table('Chemical Tanks', [{ h: 'Well', w: 2.4 }, { h: 'Chemical', w: 3.4 }, { h: 'Level', w: 1.2 }], crow);
+    for (const w of ws) for (const code of (w.ch || [])) { const x = C[w.id] || {}, g = p => (x[p] || {})[code] ?? '', v = L.toNum(g('v')), mn = L.chemMin(S.cfg, code);
+      crow.push([w.n, L.CHEM_N[code] || code, v == null ? '' : { t: v + '%', warn: v < mn }, g('f'), g('dr'), g('rt')]); }
+    if (crow.length) P.table('Chemical Tanks', [{ h: 'Well', w: 2.2 }, { h: 'Chemical', w: 3 }, { h: 'Level', w: 1 }, { h: 'Refilled', w: 1.1 }, { h: 'Drums', w: 1 }, { h: 'L/day', w: 1 }], crow);
     const ev = S.dt.filter(e => { const w = ws.find(x => x.id === e.w); return w && e.s < e0 && (e.e == null || e.e > s0); }).sort((x, y) => x.s - y.s);
     if (ev.length) P.table('Downtime', [{ h: 'Well', w: 2 }, { h: 'Reason', w: 3.4 }, { h: 'Details', w: 2.4 }, { h: 'From', w: 1.9 }, { h: 'To', w: 1.9 }], ev.map(e => [ws.find(x => x.id === e.w).n, { t: e.r, down: !e.e }, e.o || '', L.stamp(e.s), e.e ? L.stamp(e.e) : 'still down']));
     const notes = ws.filter(w => D.r[w.id] && D.r[w.id].n).map(w => [w.n, D.r[w.id].n]);

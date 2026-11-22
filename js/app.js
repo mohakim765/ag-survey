@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.7';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.8';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -23,7 +23,7 @@
     if (idb) { try { await new Promise((res, rej) => { const t = idb.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(JSON.parse(JSON.stringify(S)), 'state'); t.oncomplete = res; t.onerror = () => rej(t.error); }); return; } catch (e) { } }
     try { localStorage.setItem(DBN, JSON.stringify(S)); } catch (e) { toast('مساحة التخزين خلصت. صدّر الداتا.'); }
   }
-  const fresh = () => ({ v: 1, ui: { mode: 'type' }, plan: {}, errs: [], users: {}, me: null, admin: null, cfg: { prodDayStart: SEED.prodDayStart, dieselMin: SEED.dieselMin, gasDiffPct: SEED.gasDiffPct, edits: {}, newWells: {}, chemMin: {} }, days: {}, dt: [], samples: [], audit: [], jobs: {}, gone: {} });
+  const fresh = () => ({ v: 1, ui: { mode: 'type' }, plan: {}, errs: [], users: {}, me: null, ucode: {}, ureq: {}, uprof: {}, cfg: { prodDayStart: SEED.prodDayStart, dieselMin: SEED.dieselMin, gasDiffPct: SEED.gasDiffPct, edits: {}, newWells: {}, chemMin: {} }, days: {}, dt: [], samples: [], audit: [], jobs: {}, gone: {} });
   let S = fresh();
 
   // ---------------- config ----------------
@@ -43,8 +43,15 @@
   const H = () => S.cfg.prodDayStart;
   const curDay = () => L.prodDay(Date.now(), H());
   const me = () => S.me && S.users[S.me];
-  const isAdmin = () => !!ADMIN_ON;
-  let ADMIN_ON = false;
+  // four roles: فني، رئيس ورشة، مهندس، أدمن. The admin is one account only (AG admin, from the private seed)
+  const ADM = () => (SEED.admin && SEED.admin.u) || '';
+  const isAdmin = () => !!(S.me && S.me === ADM() && me());
+  const ROLES = [['tech', 'فني'], ['lead', 'رئيس ورشة'], ['eng', 'مهندس']];
+  const roleOf = u => !u ? '' : u.u === ADM() ? 'admin' : u.role || 'tech';
+  const roleName = u => roleOf(u) === 'admin' ? 'أدمن' : (ROLES.find(r => r[0] === roleOf(u)) || ROLES[0])[1];
+  // a new account waits for the admin (WhatsApp code or his OK). Accounts made before this version stay as they are.
+  const T_ACT = 1795435200000; // 2026-11-23 12:00 UTC
+  const isPending = u => !!u && u.u !== ADM() && (u.st === 'wait' || (!u.st && (u.at || 0) > T_ACT));
   const areaOf = id => SEED.areas.find(a => a.id === id);
   const canStaff = () => isAdmin() || !!(me() && (me().role === 'lead' || me().role === 'eng'));   // رئيس الورشة أو المهندس: توزيعة الأفراد
   const canPlan = () => isAdmin() || !!(me() && me().role === 'eng');     // المهندس: الصيانات والشغل والمهام
@@ -76,7 +83,18 @@
   const dayGet = day => S.days[day] || { r: {}, d: {}, p: {}, c: {} };
   const chemOf = (day, wid) => { const x = (dayGet(day).c || {})[wid]; return x && x.v ? x.v : {}; };
   function prevReading(wid, day) { const ds = Object.keys(S.days).filter(d => d < day).sort().reverse(); for (const d of ds) { const r = S.days[d].r[wid]; if (r && L.isDone(r)) return { d, r }; } return null; }
-  function audit(ref, refn, f, a, b, day, why) { const u = me(), aid = 'a' + uid(); S.audit.push({ id: aid, ts: Date.now(), by: S.me, byn: u ? u.name : '', day, ref, refn, f, a, b, why: why || '' }); mark('a|' + aid); if (S.audit.length > 20000) S.audit.splice(0, S.audit.length - 20000); }
+  function audit(ref, refn, f, a, b, day, why) { const u = me(), aid = 'a' + uid(); S.audit.push({ id: aid, ts: Date.now(), by: S.me, byn: u ? u.name : '', day, ref, refn, f, a, b, why: why || '' }); mark('a|' + aid); if (S.audit.length > 20000) S.audit.splice(0, S.audit.length - 20000); return aid; }
+  // the well screen saves each box when you leave it: one line in the change log per box per visit, from the value it had before the visit
+  function sessAudit(fm, key, ref, refn, f, old, nw, day, why) {
+    if (!fm) { if (old != null && old !== '' && String(old) !== String(nw ?? '')) audit(ref, refn, f, old, nw ?? '', day, why); return; }
+    fm.a0 = fm.a0 || {}; fm.aud = fm.aud || {};
+    if (!(key in fm.a0)) fm.a0[key] = old == null ? '' : String(old);
+    const a0 = fm.a0[key], b = nw == null ? '' : String(nw), id = fm.aud[key];
+    if (a0 === '' || a0 === b) { if (id) { const i = S.audit.findIndex(x => x.id === id); if (i >= 0) S.audit.splice(i, 1); if (window.SYNC) SYNC.mark('a|' + id, 0, true); delete fm.aud[key]; } return; }
+    const x = id && S.audit.find(q => q.id === id);
+    if (x) { x.b = b; x.ts = Date.now(); x.why = why || ''; if (window.SYNC) SYNC.mark('a|' + id, 0, true); return; }
+    fm.aud[key] = audit(ref, refn, f, a0, b, day, why);
+  }
   const mark = k => { if (window.SYNC) SYNC.mark(k); };
   const pushEv = ev => { S.dt.push(ev); mark('e|' + ev.id); return ev; };
   const stampBy = () => { const u = me(); return { by: S.me, byn: u ? u.name : '', t: Date.now() }; };
@@ -125,51 +143,244 @@
   }
 
   // ---------------- shell ----------------
-  const tabs = cur => { const nb = me() ? unseen(curDay(), alertAreas(curDay())).length : 0;
-    return `<nav class="tabs">${[['home', 'home', 'المناطق'], ['follow', 'list', 'المتابعة'], ['export', 'dl', 'إرسال الداتا'], ['settings', 'gear', 'الإعدادات']].map(([v, i, l]) => `<button class="${cur === v ? 'on' : ''}" data-act="go" data-v="${v}">${ic(i)}${l}${v === 'follow' && nb ? `<b class="nbdg">${nb}</b>` : ''}</button>`).join('')}</nav>`; };
+  const tabs = cur => { const nb = me() ? unseen(curDay(), alertAreas(curDay())).length : 0, na = nReqs();
+    return `<nav class="tabs">${[['home', 'home', 'المناطق'], ['follow', 'list', 'المتابعة'], ['export', 'dl', 'إرسال الداتا'], ['settings', 'gear', 'الإعدادات']].map(([v, i, l]) => `<button class="${cur === v ? 'on' : ''}" data-act="go" data-v="${v}">${ic(i)}${l}${v === 'follow' && nb ? `<b class="nbdg">${nb}</b>` : v === 'settings' && na ? `<b class="nbdg">${na}</b>` : ''}</button>`).join('')}</nav>`; };
   const top = (title, sub, back) => `<header class="top"><div class="wrap">${back ? `<button class="ib" data-act="go" data-v="${back}" aria-label="رجوع">${ic('back')}</button>` : ''}<div class="tt"><h1>${title}</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${isAdmin() ? `<span class="tag" style="color:#f2f3f5;border-color:#f2f3f5">أدمن</span>` : ''}</div></header>`;
   const dayLine = () => { const d = viewDay(), past = d !== curDay(); return `${past ? 'يوم قديم: ' : 'يوم الإنتاج: '}${arDay(d)} · من ${H()} الصبح${me() ? ' · ' + esc(me().name) : ''}`; };
 
-  // ---------------- login / register ----------------
+  // ---------------- login / register / activation ----------------
+  // phone numbers are compared as 01xxxxxxxxx (also when written +20…)
+  const phoneKey = p => { let d = digits(L.normNum(String(p || ''))).replace(/^\+/, ''); if (/^20\d{10}$/.test(d)) d = '0' + d.slice(2); else if (/^1\d{9}$/.test(d)) d = '0' + d; return d; };
+  const waNum = p => { const d = phoneKey(p); return /^0\d{10}$/.test(d) ? '20' + d.slice(1) : d; };
+  const waHref = (p, text) => `https://wa.me/${waNum(p)}?text=${encodeURIComponent(text)}`;
+  const waA = (p, text, label, cls) => `<a class="btn wa ${cls || ''}" href="${esc(waHref(p, text))}"${window.CONFIG && CONFIG.web ? ' target="_blank" rel="noopener"' : ''}>${ic('share')} ${label}</a>`;
+  const adminPhone = () => (SEED.admin && SEED.admin.phone) || '';
+  const firstName = n => String(n || '').trim().split(/\s+/)[0];
+  // the accounts that match what was typed: a user name or a phone number
+  function findAccounts(idf) {
+    const s = String(idf || '').trim(), pk = phoneKey(s);
+    if (/^0\d{10}$/.test(pk) && /^[+\d\s٠-٩-]+$/.test(s)) return Object.values(S.users).filter(x => phoneKey(x.phone) === pk);
+    const u = s.toLowerCase(); return S.users[u] ? [S.users[u]] : [];
+  }
+  const pinHash = (u, k) => sha('ws:' + u + ':' + k);
+  const codeHash = (u, t, k) => sha('wscode:' + u + ':' + t + ':' + k);
+  function busyBtn(b, txt) { if (!b) return; if (txt) { if (!b.dataset.t0) b.dataset.t0 = b.innerHTML; b.disabled = true; b.textContent = txt; } else { b.disabled = false; if (b.dataset.t0) { b.innerHTML = b.dataset.t0; delete b.dataset.t0; } } }
+  // a new phone has no accounts yet, and a password may have changed on another phone: get the latest from the sheet
+  async function pull(b, txt) { if (!SYNC.url()) return; busyBtn(b, txt || 'بيتأكد من الشيت…'); try { await SYNC.run(false); } catch (e) { } busyBtn(b, ''); }
+  // 5 wrong passwords or codes on this phone: wait a minute
+  function lockedOut() { const x = S.ui.lock; if (x && x.until > Date.now()) { toast(`استنى ${Math.ceil((x.until - Date.now()) / 1000)} ثانية وجرّب تاني`); return true; } return false; }
+  function wrongTry() { const x = S.ui.lock = Object.assign({ n: 0 }, S.ui.lock); x.n++; if (x.n >= 5) { x.n = 0; x.until = Date.now() + 60000; } save(); }
+  const okTry = () => { S.ui.lock = { n: 0 }; };
+  const pinIn = (id, ph) => `<div class="pinrow"><input id="${id}" type="password" inputmode="numeric" maxlength="4" autocomplete="off"${ph ? ` placeholder="${ph}"` : ''}></div>`;
+
   function vLogin() {
-    const users = Object.values(S.users);
-    if (!users.length || V.reg) return vRegister();
+    if (V.auth === 'reg') return vRegister();
+    if (V.auth === 'forgot') return vForgot();
     const here = (S.ui.here || []).filter(u => S.users[u]).map(u => S.users[u]);
-    const pick = here.length ? `<select class="in" id="lu">${here.map(u => `<option value="${esc(u.u)}" ${u.u === V.lu ? 'selected' : ''}>${esc(u.name)} (${esc(u.u)})</option>`).join('')}<option value="">حد تاني…</option></select><input class="in" id="lu2" dir="ltr" autocapitalize="off" placeholder="اكتب اسم المستخدم" style="margin-top:8px" hidden>`
-      : `<input class="in" id="lu2" dir="ltr" autocapitalize="off" autocomplete="username" placeholder="اسم المستخدم اللي سجلت بيه">`;
-    return `<main class="wrap"><img class="logoimg" src="img/icon.webp" alt=""><h1 class="center" style="margin:0" dir="ltr">AG Survey</h1><p class="center mute">ادخل باسمك</p>
-    <div class="card"><label class="lab">اسم المستخدم</label>${pick}
-    <label class="lab" style="margin-top:12px">الباسورد (4 أرقام)</label><div class="pinrow"><input id="lp" type="password" inputmode="numeric" maxlength="4" autocomplete="off"></div>
-    <button class="btn pen wide" data-act="login">دخول</button></div>
-    <button class="btn wide" data-act="toreg">مستخدم جديد على الموبايل ده</button></main>`;
+    return `<main class="wrap auth"><img class="logoimg" src="img/icon.webp" alt=""><h1 class="center" style="margin:0" dir="ltr">AG Survey</h1><p class="center mute">ادخل بحسابك</p>
+    <div class="card"><label class="lab">اسم المستخدم أو رقم الموبايل</label><input class="in" id="lu" dir="ltr" autocapitalize="off" autocomplete="username" value="${esc(V.lu || '')}">
+    ${here.length ? `<div class="wpchips">${here.map(u => `<button type="button" class="wpc" data-act="lupick" data-u="${esc(u.u)}"><b>${esc(u.name)}</b></button>`).join('')}</div>` : ''}
+    <label class="lab" style="margin-top:12px">الباسورد (4 أرقام)</label>${pinIn('lp')}
+    <button class="btn pen wide" data-act="login">دخول</button><button class="linkbtn center" data-act="toforgot">نسيت الباسورد؟</button></div>
+    <div class="card center"><p style="margin:0 0 10px">أول مرة تستخدم البرنامج؟</p><button class="btn wide" data-act="toreg">سجّل حساب جديد</button></div>
+    <p class="center" data-sync>${syncLine()}</p></main>`;
   }
   function vRegister() {
-    const first = !Object.keys(S.users).length;
-    return `<main class="wrap"><img class="logoimg" src="img/icon.webp" alt=""><h1 class="center" style="margin:0">${first ? 'أهلاً بيك' : 'مستخدم جديد'}</h1><p class="center mute">سجّل مرة واحدة. اسمك هيتكتب على كل قراية تدخلها.</p>
+    return `<main class="wrap auth"><img class="logoimg" src="img/icon.webp" alt=""><h1 class="center" style="margin:0">حساب جديد</h1><p class="center mute">سجّل مرة واحدة. اسمك هيتكتب على كل قراية تدخلها. بعد التسجيل الأدمن هيبعتلك كود التفعيل على الواتساب.</p>
     <div class="card"><label class="lab">الاسم بالكامل</label><input class="in" id="rn" autocomplete="name">
-    <div class="two" style="margin-top:10px"><div><label class="lab">الرقم الوظيفي</label><input class="in" id="re" inputmode="numeric"></div><div><label class="lab">رقم الموبايل</label><input class="in" id="rp" inputmode="tel" dir="ltr"></div></div>
+    <div class="two" style="margin-top:10px"><div><label class="lab">الرقم الوظيفي</label><input class="in" id="re" inputmode="numeric"></div><div><label class="lab">رقم الموبايل <em>(الواتساب)</em></label><input class="in" id="rp" inputmode="tel" dir="ltr" placeholder="01xxxxxxxxx"></div></div>
     <label class="lab" style="margin-top:10px">اسم المستخدم <em>(إنجليزي من غير مسافات)</em></label><input class="in" id="ru" dir="ltr" autocapitalize="off" autocomplete="username">
     <div class="two" style="margin-top:10px"><div><label class="lab">باسورد 4 أرقام</label><input class="in" id="rk" type="password" inputmode="numeric" maxlength="4"></div><div><label class="lab">أكّد الباسورد</label><input class="in" id="rk2" type="password" inputmode="numeric" maxlength="4"></div></div>
-    <button class="btn pen wide" data-act="register">تسجيل</button></div>${first ? '' : '<button class="btn wide" data-act="tolog">رجوع للدخول</button>'}</main>`;
+    <button class="btn pen wide" data-act="register">تسجيل</button></div><button class="btn wide" data-act="tolog">عندي حساب، ادخل</button></main>`;
   }
   async function doRegister() {
     const g = id => ($('#' + id).value || '').trim();
-    const name = g('rn'), emp = L.normNum(g('re')), phone = L.normNum(g('rp')), u = g('ru').toLowerCase(), k = L.normNum(g('rk')), k2 = L.normNum(g('rk2'));
+    const name = g('rn').replace(/\s+/g, ' '), emp = L.normNum(g('re')), phone = phoneKey(g('rp')), u = g('ru').toLowerCase(), k = L.normNum(g('rk')), k2 = L.normNum(g('rk2'));
     if (name.length < 3) return toast('اكتب الاسم بالكامل');
     if (!emp) return toast('اكتب الرقم الوظيفي');
     if (!/^01\d{9}$/.test(phone)) return toast('رقم الموبايل لازم 11 رقم ويبدأ بـ 01');
     if (!/^[a-z][a-z0-9._-]{2,19}$/.test(u)) return toast('اسم المستخدم: حروف إنجليزي وأرقام، من 3 لـ 20');
-    if (S.users[u] || (S.gone && S.gone[L.uhash(u)])) return toast('اسم المستخدم ده مش متاح، اختار غيره');
     if (!/^\d{4}$/.test(k)) return toast('الباسورد لازم 4 أرقام');
     if (k !== k2) return toast('الباسوردين مش زي بعض');
-    S.users[u] = { u, name, emp, phone, ph: await sha('ws:' + u + ':' + k), at: Date.now(), verified: false }; mark('u|' + u);
-    S.me = u; S.ui.here = [...new Set([...(S.ui.here || []), u])]; audit('user', u, 'تسجيل', '', name, curDay()); await saveNow(); V = { v: 'home' }; render(); toast('أهلاً ' + name.split(' ')[0]);
+    await pull($('[data-act=register]'));   // the name and the number are checked against every account, also on a new phone
+    if (S.users[u] || u === ADM() || (S.gone && S.gone[L.uhash(u)])) return toast('اسم المستخدم ده مش متاح، اختار غيره');
+    if (phoneKey(adminPhone()) === phone || findAccounts(phone).length) return toast('الرقم ده عليه حساب. ادخل بيه، ولو ناسي الباسورد دوس "نسيت الباسورد"');
+    S.users[u] = { u, name, emp, phone, ph: await pinHash(u, k), at: Date.now(), role: 'tech', st: 'wait' }; mark('u|' + u);
+    S.me = u; S.ui.here = [...new Set([...(S.ui.here || []), u])]; audit('user', u, 'تسجيل', '', name, curDay()); await saveNow(); V = { v: 'home' }; render(); SYNC.run(false);
   }
+  let PICK = null; // accounts that matched the phone number and the password (the user chooses one)
   async function doLogin() {
-    const sel = $('#lu'), u = sel && sel.value ? sel.value : (($('#lu2') || {}).value || '').trim().toLowerCase(), k = L.normNum($('#lp').value || ''); const x = S.users[u];
-    if (!u) return toast('اكتب اسم المستخدم'); if (!x) return toast('اسم المستخدم ده مش موجود');
-    if (x.ph !== await sha('ws:' + u + ':' + k)) { $('#lp').value = ''; return toast('الباسورد غلط'); }
-    S.me = u; S.ui.here = [...new Set([...(S.ui.here || []), u])]; save(); V = { v: 'home' }; render();
+    if (lockedOut()) return;
+    const idf = (($('#lu') || {}).value || '').trim(), k = L.normNum((($('#lp') || {}).value || '').trim()); V.lu = idf;
+    if (!idf) return toast('اكتب اسم المستخدم أو رقم الموبايل');
+    if (!/^\d{4}$/.test(k)) return toast('الباسورد 4 أرقام');
+    const check = async () => { const out = []; for (const x of findAccounts(idf)) if (x.ph && x.ph === await pinHash(x.u, k)) out.push(x); return out; };
+    let ok = await check();
+    if (!ok.length && SYNC.url()) { await pull($('[data-act=login]'), 'بيدوّر على حسابك…'); ok = await check(); }
+    if (!findAccounts(idf).length) { const st = SYNC.status(); return toast(st.linked && st.err && st.net ? 'الحساب لسه منزلش على الموبايل ده ومفيش نت. جرّب تاني لما يبقى فيه نت' : 'مفيش حساب بالاسم أو الرقم ده. لو أول مرة، سجّل حساب جديد'); }
+    if (!ok.length) { wrongTry(); const p = $('#lp'); if (p) p.value = ''; return toast('الباسورد غلط'); }
+    okTry();
+    if (ok.length > 1) { PICK = new Set(ok.map(x => x.u)); return modal(`<h3>تدخل بأنهي حساب؟</h3>${ok.map(x => `<button class="btn wide" style="margin-top:8px" data-act="loginas" data-u="${esc(x.u)}">${esc(x.name)} <small dir="ltr">${esc(x.u)}</small></button>`).join('')}<div class="btns" style="margin-top:12px"><button class="btn" data-act="mclose">إلغاء</button></div>`); }
+    loginAs(ok[0].u);
+  }
+  function loginAs(u) {
+    closeModal(); PICK = null; S.me = u; S.ui.here = [...new Set([...(S.ui.here || []), u])]; VDAY = null; V = { v: 'home' }; save(); render();
+    const x = me(); if (x && !isPending(x)) { toast('أهلاً ' + (isAdmin() ? x.name : firstName(x.name))); if (isAdmin() || x.role === 'eng') publishSeed(); }
+  }
+  // forgot the password: a request goes to the admin, he sends a code on WhatsApp, the code + a new password open the account
+  function vForgot() {
+    const u = V.fu && S.users[V.fu];
+    let h = `<main class="wrap auth"><img class="logoimg" src="img/icon.webp" alt=""><h1 class="center" style="margin:0">نسيت الباسورد</h1>`;
+    if (!u) return h + `<p class="center mute">اكتب اسم المستخدم أو رقم الموبايل اللي سجلت بيه. هيوصل طلب للأدمن، وهو هيبعتلك كود على الواتساب.</p>
+      <div class="card"><label class="lab">اسم المستخدم أو رقم الموبايل</label><input class="in" id="fu" dir="ltr" autocapitalize="off" value="${esc(V.lu || '')}"><button class="btn pen wide" data-act="forgot1">كمّل</button></div><button class="btn wide" data-act="tolog">رجوع للدخول</button></main>`;
+    const msg = `السلام عليكم، أنا ${u.name} على AG Survey (${u.u}).\nنسيت الباسورد، محتاج كود.`, mask = String(u.phone || '').replace(/^(\d{3})\d+(\d{3})$/, '$1•••••$2');
+    return h + `<p class="center mute">حساب ${esc(firstName(u.name))} · اتبعت طلب للأدمن. هيبعتلك كود 4 أرقام على الواتساب على رقمك <bdi dir="ltr">${esc(mask)}</bdi>.</p>
+      <div class="card">${adminPhone() ? waA(adminPhone(), msg, 'كلّم الأدمن على الواتساب', 'wide') : ''}
+      <label class="lab" style="margin-top:12px">الكود اللي وصلك</label><div class="pinrow"><input id="fc" inputmode="numeric" maxlength="4" autocomplete="one-time-code"></div>
+      <label class="lab">الباسورد الجديد (4 أرقام)</label>${pinIn('fk')}${pinIn('fk2', 'تأكيد')}
+      <button class="btn pen wide" data-act="forgot2">غيّر الباسورد وادخل</button><p class="mute" style="margin:10px 0 0" data-sync>${syncLine()}</p></div><button class="btn wide" data-act="tolog">رجوع للدخول</button></main>`;
+  }
+  async function forgot1() {
+    const idf = (($('#fu') || {}).value || '').trim(); V.lu = idf; if (!idf) return toast('اكتب اسم المستخدم أو رقم الموبايل');
+    let c = findAccounts(idf); if (!c.length) { await pull($('[data-act=forgot1]'), 'بيدوّر على حسابك…'); c = findAccounts(idf); }
+    if (!c.length) return toast('مفيش حساب بالاسم أو الرقم ده');
+    if (c.length > 1) return toast('الرقم ده عليه أكتر من حساب. اكتب اسم المستخدم');
+    const u = c[0].u, r = S.ureq[u], cd = S.ucode[u];
+    if (!(r && r.st === 'sent' && cd && cd.p === 'reset')) { S.ureq[u] = { t: Date.now(), st: 'wait' }; mark('ur|' + u); save(); SYNC.run(false); }   // a code already sent stays good
+    V.fu = u; render();
+  }
+  async function forgot2() {
+    if (lockedOut()) return;
+    const u = V.fu, v = id => L.normNum((($('#' + id) || {}).value || '').trim()), c = v('fc'), k = v('fk'), k2 = v('fk2');
+    if (!S.users[u]) return;
+    if (!/^\d{4}$/.test(c)) return toast('اكتب الكود اللي وصلك (4 أرقام)');
+    if (!/^\d{4}$/.test(k)) return toast('الباسورد الجديد 4 أرقام'); if (k !== k2) return toast('الباسوردين مش زي بعض');
+    await pull($('[data-act=forgot2]'));
+    const r = await useCode(u, 'reset', c); if (r !== true) { if (r === CODE_BAD) wrongTry(); return toast(r); }
+    okTry(); const x = S.users[u]; x.ph = await pinHash(u, k); x.pt = Date.now(); delete x._seed; mark('u|' + u);
+    if (S.ureq[u]) { delete S.ureq[u]; mark('ur|' + u); }
+    audit('user', u, 'الباسورد', '', 'اتغير بكود من الأدمن', curDay()); loginAs(u); SYNC.run(false); toast('اتغير الباسورد');
+  }
+  // a code the admin sent: true, or why it can't be used. It works once, for 3 days, 5 wrong tries at most.
+  const CODE_BAD = 'الكود غلط';
+  async function useCode(u, p, k) {
+    const c = S.ucode[u];
+    if (!c || c.p !== p) return 'الكود لسه موصلش للموبايل. اتأكد إن الأدمن بعته وإن فيه نت، وجرّب تاني';
+    if (Date.now() - c.t > 3 * 864e5) return 'الكود ده قديم. اطلب كود جديد من الأدمن';
+    const T = S.ui.ctry = S.ui.ctry || {}, n = T[u + c.t] || 0;
+    if (n >= 5) return 'الكود ده اتقفل بعد 5 محاولات غلط. اطلب كود جديد';
+    if (c.h !== await codeHash(u, c.t, k)) { T[u + c.t] = n + 1; save(); return CODE_BAD; }
+    delete S.ucode[u]; mark('uc|' + u); return true;
+  }
+  // a new account waits for the admin
+  function vWait() {
+    const u = me(), ap = adminPhone(), msg = `السلام عليكم، أنا ${u.name}، سجلت على AG Survey.\nاسم المستخدم: ${u.u}\nالموبايل: ${u.phone}\nمحتاج كود التفعيل.`;
+    return top('AG Survey', esc(u.name)) + `<main class="wrap"><div class="card"><h3 style="margin:0 0 6px">حسابك مستني التفعيل</h3>
+      <p class="mute" style="margin-top:0">عشان محدش يدخل باسم حد تاني، الأدمن بيفعّل كل حساب جديد بنفسه. هيبعتلك كود 4 أرقام على الواتساب على رقمك <bdi dir="ltr">${esc(u.phone)}</bdi>.</p>
+      ${ap ? waA(ap, msg, 'ابعت للأدمن على الواتساب', 'wide') : ''}
+      <label class="lab" style="margin-top:14px">كود التفعيل</label><div class="pinrow"><input id="ac" inputmode="numeric" maxlength="4" autocomplete="one-time-code"></div>
+      <button class="btn pen wide" data-act="activate">فعّل</button><p class="mute" style="margin:10px 0 0" data-sync>${syncLine()}</p></div>
+      <button class="btn wide" data-act="logout">خروج</button></main>`;
+  }
+  async function doActivate() {
+    if (lockedOut()) return;
+    const k = L.normNum((($('#ac') || {}).value || '').trim()); if (!/^\d{4}$/.test(k)) return toast('الكود 4 أرقام');
+    await pull($('[data-act=activate]'));
+    const u = me(); if (!u) return render(); if (!isPending(u)) { render(); return toast('حسابك اتفعّل'); }
+    const r = await useCode(u.u, 'act', k); if (r !== true) { if (r === CODE_BAD) wrongTry(); return toast(r); }
+    okTry(); u.st = 'ok'; u.act = { t: Date.now(), by: 'code' }; mark('u|' + u.u);
+    audit('user', u.u, 'تفعيل الحساب', '', 'بكود الواتساب', curDay()); save(); render(); SYNC.run(false); toast('اتفعّل حسابك. أهلاً ' + firstName(u.name));
+  }
+  // the account card in the settings: password, a request to change the name / number
+  function pinBox() { modal(`<h3>تغيير الباسورد</h3><label class="lab">الباسورد الحالي</label>${pinIn('po')}<label class="lab">الباسورد الجديد</label>${pinIn('pn')}${pinIn('pn2', 'تأكيد')}<div class="btns"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="pinok">غيّر</button></div>`); }
+  async function pinOk() {
+    if (lockedOut()) return;
+    const v = id => L.normNum((($('#' + id) || {}).value || '').trim()), o = v('po'), n = v('pn'), n2 = v('pn2'), u = me();
+    if (!u || u.ph !== await pinHash(u.u, o)) { wrongTry(); return toast('الباسورد الحالي غلط'); }
+    if (!/^\d{4}$/.test(n)) return toast('الباسورد الجديد 4 أرقام'); if (n !== n2) return toast('الباسوردين مش زي بعض'); if (n === o) return toast('ده نفس الباسورد');
+    okTry(); await pull($('[data-act=pinok]'));
+    const x = me(); if (!x) return closeModal(); x.ph = await pinHash(x.u, n); x.pt = Date.now(); delete x._seed; mark('u|' + x.u);
+    audit('user', x.u, 'الباسورد', '', 'اتغير', curDay()); save(); closeModal(); toast('اتغير الباسورد'); SYNC.run(false);
+  }
+  const PROF = [['name', 'الاسم'], ['emp', 'الرقم الوظيفي'], ['phone', 'الموبايل']];
+  function profBox() {
+    const u = me(), q = S.uprof[u.u], v = q && q.st === 'wait' ? q : u;
+    modal(`<h3>تعديل بياناتك</h3><p class="mute" style="margin-top:0">التعديل بيروح للأدمن، وبيتغير لما يوافق.</p>
+      <label class="lab">الاسم بالكامل</label><input class="in" id="qn" value="${esc(v.name)}">
+      <div class="two" style="margin-top:10px"><div><label class="lab">الرقم الوظيفي</label><input class="in" id="qe" inputmode="numeric" value="${esc(v.emp || '')}"></div><div><label class="lab">رقم الموبايل</label><input class="in" id="qp" inputmode="tel" dir="ltr" value="${esc(v.phone || '')}"></div></div>
+      <div class="btns" style="margin-top:12px"><button class="btn" data-act="mclose">إلغاء</button>${q && q.st === 'wait' ? '<button class="btn danger" data-act="profcancel">الغي الطلب</button>' : ''}<button class="btn pen" data-act="profok">ابعت للأدمن</button></div>`);
+  }
+  function profOk() {
+    const u = me(), name = (($('#qn').value || '').trim()).replace(/\s+/g, ' '), emp = L.normNum(($('#qe').value || '').trim()), phone = phoneKey($('#qp').value);
+    if (name.length < 3) return toast('اكتب الاسم بالكامل'); if (!emp) return toast('اكتب الرقم الوظيفي'); if (!/^01\d{9}$/.test(phone)) return toast('رقم الموبايل لازم 11 رقم ويبدأ بـ 01');
+    if (name === u.name && emp === String(u.emp || '') && phone === phoneKey(u.phone)) return toast('مفيش حاجة اتغيرت');
+    if (phone !== phoneKey(u.phone) && (findAccounts(phone).some(x => x.u !== u.u) || phone === phoneKey(adminPhone()))) return toast('الرقم ده عليه حساب تاني');
+    S.uprof[u.u] = { name, emp, phone, t: Date.now(), st: 'wait' }; mark('uq|' + u.u); save(); closeModal(); render(); SYNC.run(false); toast('اتبعت للأدمن');
+  }
+  // ---------------- the admin: accounts and requests ----------------
+  function pendingReqs() {
+    const out = [];
+    for (const u of Object.values(S.users)) if (isPending(u)) out.push({ k: 'act', u, t: u.at || 0 });
+    for (const [id, r] of Object.entries(S.ureq || {})) if (r && S.users[id]) out.push({ k: 'reset', u: S.users[id], r, t: r.t || 0 });
+    for (const [id, q] of Object.entries(S.uprof || {})) if (q && q.st === 'wait' && S.users[id]) out.push({ k: 'prof', u: S.users[id], q, t: q.t || 0 });
+    return out.sort((a, b) => b.t - a.t);
+  }
+  const nReqs = () => isAdmin() ? pendingReqs().length : 0;
+  function vUsers() {
+    const reqs = pendingReqs(), q = (V.q || '').trim().toLowerCase(), qd = digits(q), ua = u => esc(u.u);
+    let h = top('المستخدمين', `${Object.keys(S.users).length} حساب`, 'settings') + '<main class="wrap">';
+    if (reqs.length) {
+      h += `<section class="sec"><h3>طلبات مستنية <small>${reqs.length}</small></h3>`;
+      for (const x of reqs) {
+        const u = x.u, sub = `<small><bdi dir="ltr">${esc(u.u)}</bdi> · <bdi dir="ltr">${esc(u.phone)}</bdi> · من ${sinceTxt(x.t)}</small>`;
+        if (x.k === 'act') h += `<div class="req"><div class="nm"><b>${esc(u.name)}</b> <span class="tag new">حساب جديد</span>${sub}<small>الرقم الوظيفي ${esc(u.emp || '—')}</small>${S.ucode[u.u] && S.ucode[u.u].p === 'act' ? '<small>الكود اتبعت، مستني يكتبه</small>' : ''}</div><div class="btns"><button class="btn sm wa" data-act="ucode" data-u="${ua(u)}" data-p="act">${S.ucode[u.u] ? 'كود تاني' : 'ابعت كود التفعيل'}</button><button class="btn sm" data-act="uact" data-u="${ua(u)}">فعّل من غير كود</button><button class="btn sm danger" data-act="udel" data-u="${ua(u)}">امسح</button></div></div>`;
+        else if (x.k === 'reset') h += `<div class="req"><div class="nm"><b>${esc(u.name)}</b> <span class="tag">نسي الباسورد</span>${sub}${x.r.st === 'sent' ? '<small>الكود اتبعت، مستني يستخدمه</small>' : ''}</div><div class="btns"><button class="btn sm wa" data-act="ucode" data-u="${ua(u)}" data-p="reset">${x.r.st === 'sent' ? 'كود تاني' : 'ابعت كود'}</button><button class="btn sm" data-act="ureqdel" data-u="${ua(u)}">تجاهل</button></div></div>`;
+        else { const ch = PROF.filter(([f]) => String(x.q[f] ?? '') !== String(u[f] ?? ''));
+          h += `<div class="req"><div class="nm"><b>${esc(u.name)}</b> <span class="tag">تعديل بيانات</span>${sub}${ch.map(([f, l]) => `<small>${l}: <s>${esc(u[f] || '—')}</s> ← <b>${esc(x.q[f])}</b></small>`).join('')}</div><div class="btns"><button class="btn sm pen" data-act="uqok" data-u="${ua(u)}">وافق</button><button class="btn sm" data-act="uqno" data-u="${ua(u)}">ارفض</button></div></div>`; }
+      }
+      h += '</section>';
+    }
+    const us = Object.values(S.users).filter(u => !q || String(u.name).toLowerCase().includes(q) || u.u.includes(q) || (qd.length >= 3 && digits(u.phone).includes(qd)))
+      .sort((a, b) => (b.u === ADM()) - (a.u === ADM()) || String(a.name).localeCompare(String(b.name), 'ar'));
+    h += `<div class="search"><input id="uq" placeholder="ابحث بالاسم أو الرقم" value="${esc(V.q || '')}" autocomplete="off"></div><section class="sec"><h3>كل الحسابات <small>${us.length}</small></h3>`;
+    h += us.map(u => `<div class="urow"><div class="nm"><b>${esc(u.name)}</b>${isPending(u) ? ' <span class="tag new">مستني التفعيل</span>' : ''}<small><bdi dir="ltr">${esc(u.u)}</bdi> · <bdi dir="ltr">${esc(u.phone || '')}</bdi>${u.emp ? ' · ' + esc(u.emp) : ''}</small></div>
+      <div class="uact">${u.u === ADM() ? '<span class="urole">أدمن · كل الصلاحيات</span>' : `<select class="in" data-role="${ua(u)}" aria-label="الوظيفة">${ROLES.map(([r, l]) => `<option value="${r}" ${roleOf(u) === r ? 'selected' : ''}>${l}</option>`).join('')}</select>`}<button class="btn sm" data-act="uedit" data-u="${ua(u)}">تعديل</button></div></div>`).join('') || '<p class="empty">مفيش حد بالاسم ده</p>';
+    h += `</section><p class="mute">فني: القرايات والعينات. رئيس ورشة: وكمان توزيعة الأفراد. مهندس: وكمان الصيانات والشغل والمهام، وإرسال داتا أكتر من يوم. الأدمن: كل حاجة.</p>`;
+    return h + '</main>' + tabs('settings');
+  }
+  function userBox(id) {
+    const u = S.users[id]; if (!u || !isAdmin()) return; const adm = u.u === ADM(), pend = isPending(u);
+    modal(`<h3>${esc(u.name)}</h3><p class="mute" dir="ltr" style="margin-top:0">${esc(u.u)}</p>
+      <label class="lab">الاسم بالكامل</label><input class="in" id="en" value="${esc(u.name)}">
+      <div class="two" style="margin-top:10px"><div><label class="lab">الرقم الوظيفي</label><input class="in" id="ee" inputmode="numeric" value="${esc(u.emp || '')}"></div><div><label class="lab">رقم الموبايل</label><input class="in" id="ep" inputmode="tel" dir="ltr" value="${esc(u.phone || '')}"></div></div>
+      ${adm ? '' : `<label class="lab" style="margin-top:10px">الوظيفة</label><select class="in" id="er">${ROLES.map(([r, l]) => `<option value="${r}" ${roleOf(u) === r ? 'selected' : ''}>${l}</option>`).join('')}</select>`}
+      <div class="btns" style="margin-top:12px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="ueditok" data-u="${esc(u.u)}">حفظ</button></div>
+      ${adm ? '' : `<div class="btns" style="margin-top:8px"><button class="btn sm wa" data-act="ucode" data-u="${esc(u.u)}" data-p="${pend ? 'act' : 'reset'}">${pend ? 'كود التفعيل' : 'كود باسورد جديد'}</button>${u.u === S.me ? '' : `<button class="btn sm danger" data-act="udel" data-u="${esc(u.u)}">امسح الحساب</button>`}</div>`}`);
+  }
+  function userEditOk(id) {
+    const u = S.users[id]; if (!u || !isAdmin()) return;
+    const name = (($('#en').value || '').trim()).replace(/\s+/g, ' '), emp = L.normNum(($('#ee').value || '').trim()), phone = phoneKey($('#ep').value), role = $('#er') ? $('#er').value : u.role;
+    if (name.length < 2) return toast('اكتب الاسم'); if (!/^01\d{9}$/.test(phone)) return toast('رقم الموبايل لازم 11 رقم ويبدأ بـ 01');
+    if (findAccounts(phone).some(x => x.u !== id)) return toast('الرقم ده عليه حساب تاني');
+    let ch = false;
+    for (const [f, l] of PROF) { const nv = f === 'name' ? name : f === 'emp' ? emp : phone; if (String(u[f] ?? '') !== String(nv)) { audit('user', u.u, l, u[f] ?? '', nv, curDay()); u[f] = nv; ch = true; } }
+    if (u.u !== ADM() && role && roleOf(u) !== role) { audit('user', u.u, 'الوظيفة', roleName(u), (ROLES.find(r => r[0] === role) || ROLES[0])[1], curDay()); u.role = role; ch = true; }
+    closeModal(); if (!ch) return;
+    delete u._seed; mark('u|' + u.u); save(); render(); toast('اتحفظ'); SYNC.run(false);
+  }
+  async function sendCode(id, p) {
+    const u = S.users[id]; if (!u || !isAdmin()) return;
+    const a = new Uint32Array(1); if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(a); else a[0] = Math.floor(Math.random() * 1e9);
+    const code = String(1000 + a[0] % 9000), t = Date.now();
+    S.ucode[id] = { p, t, h: await codeHash(id, t, code), by: S.me }; mark('uc|' + id);
+    if (p === 'reset' && S.ureq[id]) { S.ureq[id] = Object.assign({}, S.ureq[id], { st: 'sent', at: t }); mark('ur|' + id); }
+    audit('user', id, p === 'act' ? 'كود التفعيل' : 'كود باسورد جديد', '', 'اتعمل', curDay()); save(); render(); SYNC.run(false);
+    const msg = p === 'act' ? `كود تفعيل حسابك على AG Survey: ${code}` : `كود تغيير الباسورد على AG Survey: ${code}\nاكتبه في شاشة "نسيت الباسورد".`;
+    modal(`<h3>${p === 'act' ? 'كود التفعيل' : 'كود الباسورد الجديد'}</h3><p class="mute" style="margin-top:0">لـ ${esc(u.name)} · <bdi dir="ltr">${esc(u.phone)}</bdi></p><p class="bigcode" dir="ltr">${code}</p><p class="mute">ابعته له على الواتساب. الكود بيشتغل مرة واحدة، ولمدة 3 أيام.</p>${waA(u.phone, msg, 'ابعته على الواتساب', 'wide')}<div class="btns" style="margin-top:10px"><button class="btn" data-act="mclose">تمام</button></div>`);
+  }
+  function seedAdmin() { // the AG admin account is in the private seed, so it is there on every phone, also before the first sync
+    const A = SEED.admin; if (!A || !A.u || !A.ph) return; const x = S.users[A.u];
+    if (!x || (x._seed && (x.ph !== A.ph || x.phone !== A.phone))) S.users[A.u] = { u: A.u, name: A.name || 'AG admin', emp: '', phone: A.phone || '', ph: A.ph, at: A.at || 0, role: 'admin', st: 'ok', _seed: 1 };
   }
 
   // ---------------- home ----------------
@@ -180,7 +391,8 @@
       const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
       h += `<div class="banner info inst"><span>${ios ? 'عشان تثبّته على الآيفون: من Safari دوس زرار المشاركة <b>⬆</b> وبعدين <b>Add to Home Screen</b>.' : window.__installEvt ? 'تقدر تثبّت البرنامج على الكمبيوتر وتفتحه من أيقونة.' : 'تقدر تثبّته من قايمة Chrome أو Edge: <b>Install AG Survey</b>.'}</span>${!ios && window.__installEvt ? '<button class="btn sm pen" data-act="install">ثبّت</button>' : ''}<button class="ib3 xs" data-act="noinst" aria-label="اقفل">×</button></div>`;
     }
-    if (isAdmin()) h += `<div class="card"><label class="lab">اليوم اللي بتشوفه <em>(الأدمن بس يقدر يفتح أيام قديمة)</em></label><input class="in" type="date" id="vday" value="${d}" max="${curDay()}"></div>`;
+    if (isAdmin()) { const n = nReqs(); if (n) h += `<button class="banner info wide" data-act="go" data-v="users">فيه ${n === 1 ? 'طلب' : n + ' طلبات'} من المستخدمين مستني${n === 1 ? '' : 'ة'} ردك ←</button>`;
+      h += `<div class="card"><label class="lab">اليوم اللي بتشوفه <em>(الأدمن بس يقدر يفتح أيام قديمة)</em></label><input class="in" type="date" id="vday" value="${d}" max="${curDay()}"></div>`; }
     else if (d !== curDay()) VDAY = null;
     h += `<p class="homesync" data-sync>${syncLine()}</p><div class="agrid">`;
     for (const a of SEED.areas) {
@@ -408,9 +620,8 @@
   }
   function chemSection(ws, d, ro) {
     if (!ws.length) return '';
-    let h = `<section class="sec"><h3>الكيميكال <small>نسبة التانك %</small></h3>`;
-    for (const w of ws) { const cv = chemOf(d, w.id); for (const c of w.ch) { const v = cv[c] ?? '', n = L.toNum(v), mn = L.chemMin(S.cfg, c);
-      h += `<div class="irow"><span class="nm">${esc(w.n)}<small><bdi dir="ltr">${esc(L.CHEM_N[c] || c)}</bdi> · تنبيه تحت ${mn}%</small></span><input inputmode="decimal" data-chw="${w.id}" data-chc="${c}" value="${esc(v)}" class="${n != null && n < mn ? 'low' : ''}" ${ro}><span class="u">%</span></div>`; } }
+    let h = `<section class="sec"><h3>الكيميكال <small>التانك، التفويل، البراميل، الاستهلاك</small></h3>`;
+    for (const w of ws) h += `<p class="chwn">${esc(w.n)}</p>` + w.ch.map(c => chemBlock(w, c, d, ro)).join('');
     return h + '</section>';
   }
   // ---------------- المتابعة: people, today's maintenance, work on wells, tasks ----------------
@@ -449,14 +660,30 @@
     h += T.length ? T.map(({ it, aid }) => `<div class="pitem${fresh(it)}"><label class="tk"><input type="checkbox" data-task="${it.id}" data-a="${aid}" ${it.done ? 'checked' : ''} ${editable() ? '' : 'disabled'}><span class="pt">${ar(aid)}${esc(it.x)}${it.w ? ' · ' + nm(it.w) : ''}<small>${it.done ? 'خلصت · ' + esc(it.done.byn || '') + ' ' + hmA(it.done.t) : esc(it.byn || '')}</small></span></label>${del('tasks', it, aid)}</div>`).join('') : '<p class="empty">مفيش مهام النهارده</p>';
     return h + add('tasks') + '</section>';
   }
+  // the distribution on المتابعة: a small card with the counts; the whole thing opens on its own page
+  function staffCard(d) {
+    const ids = SEED.areas.map(a => a.id), groups = areasOrdered().map(a => ({ n: a.n, k: planFor(d, a.id).staff.length, me: planFor(d, a.id).staff.some(x => isMe(staffP(x))) }))
+      .concat(jobsFor(d).map(j => ({ n: j.k, k: j.staff.length, me: j.staff.some(x => isMe(staffP(x))) })));
+    const tot = groups.reduce((n, g) => n + g.k, 0), mine = groups.filter(g => g.me).map(g => g.n);
+    const yd = L.addDays(d, -1), copy = canStaff() && editable() && !tot && (ids.some(id => planFor(yd, id).staff.length) || jobsFor(yd).length);
+    return `<button class="sec scard" data-act="go" data-v="staff"><span class="sch"><b>توزيعة الأفراد</b><small>${tot ? (tot === 1 ? 'فرد واحد' : tot === 2 ? 'فردين' : tot + (tot <= 10 ? ' أفراد' : ' فرد')) : ''}</small><span class="chev">${ic('back')}</span></span>
+      ${tot ? `<span class="scl">${groups.filter(g => g.k).map(g => `<span class="scg"><b>${esc(g.n)}</b> ${g.k}</span>`).join('')}</span>` : `<span class="mute">لسه محدش اتوزع النهارده${copy ? ' · دوس هنا وخد توزيعة امبارح' : ''}</span>`}
+      ${mine.length ? `<span class="scme">انت في: <b>${mine.map(esc).join(' و')}</b></span>` : ''}</button>`;
+  }
+  function vStaff() {
+    const d = viewDay(), cs = canStaff() && editable(), ids = SEED.areas.map(a => a.id), yd = L.addDays(d, -1);
+    let h = top('توزيعة الأفراد', dayLine(), 'follow') + '<main class="wrap">';
+    if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للأدمن بس.</div>`;
+    h += `<button class="btn wa wide" style="margin-top:12px" data-act="stshare">${ic('share')} ابعت التوزيعة صورة على الواتساب</button>`;
+    h += `<section class="sec plan"><div class="pbody"><div class="sgrid">${areasOrdered().map(a => sbox({ aid: a.id }, d, cs)).join('')}${jobsFor(d).map(j => sbox({ job: j.id }, d, cs)).join('')}${cs ? '<button class="sadd" data-act="jobadd"><b>+</b>خانة تانية<small>سيارة الديزل، Treatment…</small></button>' : ''}</div>`;
+    if (cs && ids.every(id => !planFor(d, id).staff.length) && !jobsFor(d).length && (ids.some(id => planFor(yd, id).staff.length) || jobsFor(yd).length)) h += `<button class="btn wide" style="margin-top:10px" data-act="stcopyall">نفس توزيعة امبارح</button>`;
+    return h + '</div></section></main>' + tabs('follow');
+  }
   function vFollow() {
-    const d = viewDay(), cs = canStaff() && editable(), cp = canPlan() && editable(), ids = SEED.areas.map(a => a.id), now = Date.now();
+    const d = viewDay(), cp = canPlan() && editable(), ids = SEED.areas.map(a => a.id), now = Date.now();
     let h = top('المتابعة', dayLine()) + '<main class="wrap">';
     if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للأدمن بس.</div>`;
-    h += `<section class="sec plan"><h3>توزيعة الأفراد <button class="btn sm wa shr" data-act="stshare">${ic('share')} شير صورة</button></h3><div class="pbody"><div class="sgrid">${areasOrdered().map(a => sbox({ aid: a.id }, d, cs)).join('')}${jobsFor(d).map(j => sbox({ job: j.id }, d, cs)).join('')}${cs ? '<button class="sadd" data-act="jobadd"><b>+</b>خانة تانية<small>سيارة الديزل، Treatment…</small></button>' : ''}</div>`;
-    const yd = L.addDays(d, -1);
-    if (cs && ids.every(id => !planFor(d, id).staff.length) && !jobsFor(d).length && (ids.some(id => planFor(yd, id).staff.length) || jobsFor(yd).length)) h += `<button class="btn wide" style="margin-top:10px" data-act="stcopyall">نفس توزيعة امبارح</button>`;
-    h += '</div></section>' + planSections(ids, d, cp, true);
+    h += staffCard(d) + planSections(ids, d, cp, true);
     const open = WELLS.map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
     h += `<section class="sec"><h3>واقف دلوقتي <small>${open.length}</small></h3>`;
     h += open.length ? open.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} <span class="tag">${esc(areaOf(w.a).n)}</span></span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}</span><span class="wm"></span></button>`).join('') : '<p class="empty">كل الآبار شغالة</p>';
@@ -483,14 +710,14 @@
   let PP = null; // { t: {aid}|{job}|{newJob}, sel: [user names], q, have: Set of names already in the box }
   function ppHtml(t, have) {
     PP = { t, sel: [], q: '', have: new Set(have) };
-    const any = Object.keys(S.users).length;
+    const any = Object.values(S.users).some(u => u.u !== ADM() && !isPending(u));
     return `${any ? `<label class="lab">من المسجلين على التطبيق</label><div class="wp"><input class="in wpq" id="ppq" placeholder="ابحث بالاسم أو الرقم" autocomplete="off"><div id="pps">${ppSel()}</div><div class="wpl" id="ppl">${ppList()}</div></div>` : ''}
       <label class="lab" style="margin-top:12px">${any ? 'أو اكتب اسم مش مسجل' : 'الاسم'}</label><input class="in" id="stn" placeholder="الاسم" autocomplete="off">
       <input class="in" id="stp" inputmode="tel" dir="ltr" placeholder="رقم التليفون (اختياري)" autocomplete="off" style="margin-top:8px">`;
   }
   function ppList() {
     const q = PP.q.trim().toLowerCase(), qd = digits(q);
-    const us = Object.values(S.users).filter(u => !PP.have.has(u.name) && (!q || String(u.name).toLowerCase().includes(q) || (qd.length >= 3 && digits(u.phone).includes(qd))))
+    const us = Object.values(S.users).filter(u => u.u !== ADM() && !isPending(u) && !PP.have.has(u.name) && (!q || String(u.name).toLowerCase().includes(q) || (qd.length >= 3 && digits(u.phone).includes(qd))))
       .sort((x, y) => String(x.name).localeCompare(String(y.name), 'ar'));
     return us.map(u => { const on = PP.sel.includes(u.u); return `<button type="button" class="wpi ${on ? 'on' : ''}" data-act="ppk" data-u="${esc(u.u)}"><i class="cb">${on ? ic('check') : ''}</i><b>${esc(u.name)}</b><span class="mute" dir="ltr">${esc(u.phone || '')}</span></button>`; }).join('')
       || `<p class="empty">${q ? 'مفيش حد بالاسم ده' : 'كل المسجلين موجودين هنا'}</p>`;
@@ -566,12 +793,13 @@
       const d2 = walk(d); if (JSON.stringify(d2) === s0) return;
       SYNC._set(k, d2); SYNC.mark(k, 0, true); n++;
     });
-    if (S.me === x) { S.me = null; ADMIN_ON = false; }
+    for (const [m, p] of [['ucode', 'uc'], ['ureq', 'ur'], ['uprof', 'uq']]) if (S[m] && S[m][x]) { delete S[m][x]; mark(p + '|' + x); }
+    if (S.me === x) S.me = null;
     return n;
   }
   // a person removed on another phone
   function onGone(h) {
-    for (const u of Object.keys(S.users)) if (L.uhash(u) === h) { delete S.users[u]; S.ui.here = (S.ui.here || []).filter(v => v !== u); if (S.me === u) { S.me = null; ADMIN_ON = false; } }
+    for (const u of Object.keys(S.users)) if (L.uhash(u) === h) { delete S.users[u]; for (const m of ['ucode', 'ureq', 'uprof']) if (S[m]) delete S[m][u]; S.ui.here = (S.ui.here || []).filter(v => v !== u); if (S.me === u) S.me = null; }
   }
   // the web version (iPhone, computer) has no field data inside it: the Android app puts the wells' data
   // in the sheet in parts, and the web version takes it from there after the admin's private link
@@ -603,7 +831,7 @@
   const GONE0 = ['58e77434de587e52'];
   // an alert when something new reaches the area this person works in
   function checkAlerts() {
-    if (!me() || FM || !modalEl.hidden || VDAY) return;
+    if (!me() || isPending(me()) || FM || !modalEl.hidden || VDAY) return;
     const d = curDay(), al = S.ui.alerted || (S.ui.alerted = {}), list = unseen(d, myAreas(d)).filter(x => !al[x.it.id]); // only people placed in the area
     if (!list.length) return;
     for (const x of list) al[x.it.id] = 1; save();
@@ -708,18 +936,28 @@
     save(); closeModal(); render(); toast(`اتحفظ ووصل لمتابعة ${done.map(a => areaOf(a).n).join(' و')}`);
   }
   // ---------------- well form ----------------
-  let FM = null; // {w, v, n, dirty}
-  function openWell(id) {
-    const w = WBY[id]; if (!w) return; const r = dayGet(viewDay()).r[id];
-    const tv = {}; for (const t of tanksOf(id)) { const x = dayGet(viewDay()).d[t.id]; tv[t.id] = x ? x.v : ''; }
-    const cx = chemOf(viewDay(), id), cv = {}; for (const c of w.ch || []) cv[c] = cx[c] ?? '';
-    FM = { w, v: Object.assign({}, r ? r.v : {}), n: r ? r.n || '' : '', tv, cv, dirty: false };
+  // every box saves itself when you leave it (no save button); the back arrow only closes the screen
+  let FM = null; // {w, v, n, a0, aud, why, ro}
+  function openWell(id, why) {
+    const w = WBY[id]; if (!w) return;
+    // an old day (the admin only): the reason is asked once, before anything changes
+    if (why === undefined && viewDay() !== curDay() && editable()) {
+      MCB = () => { const v = ($('#mt').value || '').trim(); if (!v) return toast('اكتب السبب، أو دوس "فرجة بس"'); closeModal(); openWell(id, v); };
+      return modal(`<h3>${esc(w.n)} · يوم قديم</h3><p class="mute" style="margin-top:0">${esc(arDay(viewDay()))}. لو هتعدّل، اكتب السبب. بيتسجل في سجل التعديلات.</p><input class="in" id="mt" placeholder="سبب التعديل"><div class="btns" style="margin-top:12px"><button class="btn" data-act="wview" data-w="${w.id}">فرجة بس</button><button class="btn pen" data-act="mok">افتح للتعديل</button></div>`);
+    }
+    const r = dayGet(viewDay()).r[id];
+    FM = { w, v: Object.assign({}, r ? r.v : {}), n: r ? r.n || '' : '', a0: {}, aud: {}, why: why || '', ro: why === null };
     renderForm(); formEl.hidden = false; document.body.classList.add('lock'); history.pushState({ f: 1 }, '');
   }
-  function closeForm(force) {
-    if (!FM) return; if (FM.dirty && !force) return confirmBox('في قرايات متحفظتش. تقفل من غير حفظ؟', 'اقفل من غير حفظ', () => closeForm(true));
+  const formRo = () => !FM || FM.ro || !editable();
+  // the box you are in is saved before the screen closes (the back arrow, the phone's back button, the app going to the background)
+  function flushForm() { if (!FM) return true; const a = document.activeElement; if (a && formEl.contains(a) && /INPUT|TEXTAREA/.test(a.tagName)) a.blur(); return !formEl.querySelector('.bad'); }
+  function closeForm() {
+    if (!FM) return;
+    if (!flushForm()) { const b = formEl.querySelector('.bad'); if (b) b.focus(); return toast('فيه رقم غلط متحفظش. صلّحه أو امسحه'); }
     FM = null; formEl.hidden = true; formEl.innerHTML = ''; document.body.classList.remove('lock'); render(); setTimeout(checkAlerts, 300);
   }
+  function savedTick() { const el = $('#fsv'); if (!el) return; el.innerHTML = ic('check') + 'اتحفظ'; el.classList.add('on'); clearTimeout(savedTick.t); savedTick.t = setTimeout(() => el.classList.remove('on'), 1800); }
   function fieldHtml(w, k, prev, ro) {
     const F = L.FIELDS[k], v = FM.v[k] ?? '';
     if (F.k === 'csg') return `<div class="fwide"><span class="lab">CSG Status</span><div class="seg" data-csg>${[['F', 'Open to flare'], ['P', 'Open to production'], ['C', 'Closed']].map(([c, l]) => `<button type="button" class="${v === c ? 'on' : ''}" data-act="csg" data-v="${c}" ${ro}>${l}</button>`).join('')}</div></div>`;
@@ -761,66 +999,91 @@
     if (!ro && !e) h += `<button class="linkbtn" data-act="evadd">+ سجّل وقفة حصلت وخلصت</button>`;
     return h + '</div>';
   }
+  // chemicals: tank level %, when it was filled, drums on the well, consumption a day (litres)
+  const CHP = { v: '%', f: 'وقت التفويل', dr: 'عدد البراميل', rt: 'معدل الاستهلاك' };
+  const chemRec = (day, wid) => (dayGet(day).c || {})[wid] || {};
+  function prevChem(wid, part, c, day) { const ds = Object.keys(S.days).filter(d => d < day).sort().reverse().slice(0, 60); for (const d of ds) { const x = (S.days[d].c || {})[wid]; if (x && x[part] && (x[part][c] ?? '') !== '') return x[part][c]; } return ''; }
+  function tsOfHM(day, v) { if (!/^\d\d:\d\d$/.test(v || '')) return null; const [hh, mm] = v.split(':').map(Number), [a] = L.dayWindow(day, H()), d = new Date(a); d.setHours(hh, mm, 0, 0); if (hh < H()) d.setDate(d.getDate() + 1); return d.getTime(); }
+  function chemBlock(w, c, d, ro) {
+    const x = chemRec(d, w.id), g = p => (x[p] || {})[c] ?? '', v = g('v'), n = L.toNum(v), mn = L.chemMin(S.cfg, c);
+    const pv = p => { const q = prevChem(w.id, p, c, d); return q !== '' ? `آخر مرة ${esc(p === 'f' ? hmWords(q) : q)}` : ''; };
+    const da = `data-chw="${w.id}" data-chc="${c}"`, ft = g('f');
+    let ti = timeInput(`cft-${w.id}-${c}`, ft ? tsOfHM(d, ft) : null, ro ? '' : `<button type="button" class="btn sm chnow" data-act="chnow" ${da}>دلوقتي</button>`).replace('<div class="tin"', `<div class="tin" ${da} data-chp="f"`); if (ro) ti = ti.replace(/<input /g, '<input disabled ').replace(/<button /g, '<button disabled ');
+    return `<div class="chb"><div class="irow"><span class="nm"><bdi dir="ltr">${esc(L.CHEM_N[c] || c)}</bdi><small>نسبة التانك · تنبيه تحت ${mn}%</small></span><input inputmode="decimal" ${da} data-chp="v" value="${esc(v)}" class="${n != null && n < mn ? 'low' : ''}" ${ro}><span class="u">%</span></div>
+      <div class="chx"><div class="chf"><span class="lab">وقت التفويل</span><div class="chtw">${ti}</div><span class="prev">${ft ? '' : pv('f')}</span></div>
+      <div class="two"><label class="chf"><span class="lab">عدد البراميل على البير</span><input class="in" inputmode="numeric" ${da} data-chp="dr" value="${esc(g('dr'))}" placeholder="${esc(prevChem(w.id, 'dr', c, d))}" ${ro}></label>
+      <label class="chf"><span class="lab">معدل الاستهلاك <em>لتر/يوم</em></span><input class="in" inputmode="decimal" ${da} data-chp="rt" value="${esc(g('rt'))}" placeholder="${esc(prevChem(w.id, 'rt', c, d))}" ${ro}></label></div></div></div>`;
+  }
   function renderForm() {
-    const w = FM.w, T = L.TYPES[w.t], d = viewDay(), ro = editable() ? '' : 'disabled';
+    const w = FM.w, T = L.TYPES[w.t], d = viewDay(), ro = formRo() ? 'disabled' : '';
     const prev = prevReading(w.id, d);
     let fs = T.f.slice(); if (w.t === 'GL' && w.k > 0) fs = fs.filter(k => k !== 'GINJ');
     const sub = [T.n, w.sec !== T.n ? w.sec : '', w.p ? 'في الورقة: ' + w.p : ''].filter(Boolean).join(' · ');
-    let h = `<header class="fhead"><div class="wrap"><button class="ib" data-act="fclose" aria-label="رجوع">${ic('back')}</button><div class="tt"><h2 class="fname">${esc(w.n)}</h2><p class="sub">${esc(sub)}</p></div></div></header><div class="fbody"><div class="wrap">`;
+    let h = `<header class="fhead"><div class="wrap"><button class="ib" data-act="fclose" aria-label="رجوع">${ic('back')}</button><div class="tt"><h2 class="fname">${esc(w.n)}</h2><p class="sub">${esc(sub)}</p></div><span class="fsv" id="fsv" aria-live="polite"></span></div></header><div class="fbody"><div class="wrap">`;
     h += statusHtml(w, ro);
     if (w.hid) h += `<div class="banner">البير ده مخفي عن الفنيين. لو سجلت قراية، الأدمن هيعرف.</div>`;
     if (w.t === 'GL') h += `<div class="banner info">العداد: <b>${esc(w.m || (w.k > 0 ? 'Orifice' : '—'))}</b>${w.k > 0 ? ` · Factor ${w.k}` : ' · قراية مباشرة'}${w.tg ? ` · التارجت ${w.tg}` : ''}</div>`;
     if (w.disc) h += `<div class="banner">العداد Disconnected. القرايات مش إجبارية، اكتب اللي حصل في الكومنت.</div>`;
     h += `<div class="grid">${fs.map(k => fieldHtml(w, k, prev, ro)).join('')}</div><div id="calc">${calcHtml(w)}</div>`;
-    const tk = tanksOf(w.id);
+    const tk = tanksOf(w.id), D = dayGet(d);
     if (tk.length) {
       h += `<p class="flab">الديزل</p><section class="sec" style="margin-top:0">`;
-      for (const [i, t] of tk.entries()) { const v = FM.tv[t.id] ?? '', n = L.toNum(v); h += `<div class="irow"><span class="nm">${tk.length > 1 ? 'تانك ' + (i + 1) : 'التانك'}<small>${esc(t.code || 'من غير كود')}${t.cap ? ' · ' + t.cap.toLocaleString('en') + ' لتر' : ''}${t.w.length > 1 ? ' · مشترك مع ' + t.w.filter(x => x !== w.id).map(x => WBY[x] ? esc(WBY[x].n) : '').join(' + ') : ''}</small></span><input inputmode="decimal" data-ftk="${t.id}" value="${esc(v)}" class="${n != null && n < S.cfg.dieselMin ? 'low' : ''}" ${ro}><span class="u">%</span></div>`; }
+      for (const [i, t] of tk.entries()) { const x = D.d[t.id], v = x ? x.v : '', n = L.toNum(v); h += `<div class="irow"><span class="nm">${tk.length > 1 ? 'تانك ' + (i + 1) : 'التانك'}<small>${esc(t.code || 'من غير كود')}${t.cap ? ' · ' + t.cap.toLocaleString('en') + ' لتر' : ''}${t.w.length > 1 ? ' · مشترك مع ' + t.w.filter(x => x !== w.id).map(x => WBY[x] ? esc(WBY[x].n) : '').join(' + ') : ''}</small></span><input inputmode="decimal" data-ftk="${t.id}" value="${esc(v)}" class="${n != null && n < S.cfg.dieselMin ? 'low' : ''}" ${ro}><span class="u">%</span></div>`; }
       h += '</section>';
     }
-    if ((w.ch || []).length) {
-      h += `<p class="flab">الكيميكال</p><section class="sec" style="margin-top:0">`;
-      for (const c of w.ch) { const v = FM.cv[c] ?? '', n = L.toNum(v), mn = L.chemMin(S.cfg, c); h += `<div class="irow"><span class="nm"><bdi dir="ltr">${esc(L.CHEM_N[c] || c)}</bdi><small>نسبة التانك · تنبيه تحت ${mn}%</small></span><input inputmode="decimal" data-fch="${c}" value="${esc(v)}" class="${n != null && n < mn ? 'low' : ''}" ${ro}><span class="u">%</span></div>`; }
-      h += '</section>';
-    }
+    if ((w.ch || []).length) h += `<p class="flab">الكيميكال</p><section class="sec" style="margin-top:0">${w.ch.map(c => chemBlock(w, c, d, ro)).join('')}</section>`;
     h += `<p class="flab">كومنت</p><textarea class="in" id="fn" ${ro} placeholder="${w.disc ? 'إيه حالة العداد؟' : 'اختياري'}">${esc(FM.n)}</textarea>`;
     if (prev) h += `<p class="mute" style="margin-top:10px">آخر قراية: ${esc(prev.d)}${prev.r.byn ? ' · ' + esc(prev.r.byn) : ''}</p>`;
-    h += `</div></div><footer class="ffoot"><div class="wrap"><button class="btn" data-act="fclose">رجوع</button>${ro ? '' : '<button class="btn pen" data-act="fsave">حفظ</button>'}</div></footer>`;
-    formEl.innerHTML = h;
+    h += ro ? (FM.ro ? '<p class="mute center">فتحته فرجة بس، مفيش حاجة هتتغير.</p>' : '') : `<p class="mute center autosv">${ic('check')} كل خانة بتتحفظ لوحدها أول ما تخرج منها. مفيش زرار حفظ.</p>`;
+    formEl.innerHTML = h + `</div></div>`;
   }
   function refreshCalc() { const c = $('#calc'); if (c && FM) c.innerHTML = calcHtml(FM.w); }
-  function saveForm(why) {
-    const w = FM.w, d = viewDay(); if (!editable()) return;
-    for (const [tid, x] of Object.entries(FM.tv)) { if (x === '' || x == null) continue; const n = L.toNum(x); if (n == null || n < 0 || n > 100) { const el = formEl.querySelector(`[data-ftk="${tid}"]`); if (el) { el.classList.add('bad'); el.focus(); } return toast('نسبة الديزل لازم تبقى من 0 لـ 100'); } }
-    for (const [c, x] of Object.entries(FM.cv || {})) { if (x === '' || x == null) continue; const n = L.toNum(x); if (n == null || n < 0 || n > 100) { const el = formEl.querySelector(`[data-fch="${c}"]`); if (el) { el.classList.add('bad'); el.focus(); } return toast('نسبة الكيميكال لازم تبقى من 0 لـ 100'); } }
-    if (d !== curDay() && why == null) return askText('سبب التعديل في يوم قديم', 'اكتب السبب', t => saveForm(t));
-    const D = dayObj(d), old = D.r[w.id] || { v: {}, n: '' };
+  // the readings and the comment: one record for the well, written again each time a box is left
+  function commitReading() {
+    if (formRo()) return;
+    const w = FM.w, d = viewDay(), D = dayObj(d), old = D.r[w.id] || { v: {}, n: '' }, ov = old.v || {};
     const v = {}; for (const [k, x] of Object.entries(FM.v)) if (x !== '' && x != null) v[k] = String(x);
-    const n = ($('#fn') ? $('#fn').value : FM.n).trim();
-    let changed = false;
-    for (const k of new Set([...Object.keys(old.v), ...Object.keys(v)])) if ((old.v[k] ?? '') !== (v[k] ?? '')) { changed = true; if (old.v[k] != null) audit(w.id, w.n, k, old.v[k], v[k] ?? '', d, why); }
-    if ((old.n || '') !== n) { changed = true; if (old.n) audit(w.id, w.n, 'كومنت', old.n, n, d, why); }
-    if (changed) { if (Object.keys(v).length || n) D.r[w.id] = Object.assign({ v, n }, stampBy()); else delete D.r[w.id]; mark(`r|${d}|${w.id}`); }
-    for (const [tid, x] of Object.entries(FM.tv)) setTank(tid, x, d, why);
-    if (Object.keys(FM.cv || {}).length) setChem(w.id, FM.cv, d, why);
-    if (w.hid && changed) audit(w.id, w.n, 'قراية على بير مخفي', '', 'اتسجل', d, why);
-    save(); FM.dirty = false; closeForm(true); toast('اتحفظ');
+    const fn = $('#fn'), n = (fn ? fn.value : FM.n).trim();
+    const keys = [...new Set([...Object.keys(ov), ...Object.keys(v)])].filter(k => (ov[k] ?? '') !== (v[k] ?? ''));
+    if (!keys.length && (old.n || '') === n) return;
+    for (const k of keys) sessAudit(FM, 'r|' + k, w.id, w.n, k, ov[k], v[k] ?? '', d, FM.why);
+    if ((old.n || '') !== n) sessAudit(FM, 'r|n', w.id, w.n, 'كومنت', old.n, n, d, FM.why);
+    if (Object.keys(v).length || n) D.r[w.id] = Object.assign({ v, n }, stampBy()); else delete D.r[w.id];
+    mark(`r|${d}|${w.id}`);
+    if (w.hid && !FM.hidAud) { FM.hidAud = 1; audit(w.id, w.n, 'قراية على بير مخفي', '', 'اتسجل', d, FM.why); }
+    save(); savedTick();
   }
-  function setChem(wid, vals, d, why) {
-    const D = dayObj(d), old = D.c[wid], ov = old ? old.v : {}, nv = Object.assign({}, ov); let changed = false;
-    for (const [c, x0] of Object.entries(vals)) {
-      const x = x0 == null ? '' : String(x0).trim(), o = ov[c] ?? ''; if (o === x) continue; changed = true;
-      if (o !== '') audit(wid, (WBY[wid] ? WBY[wid].n : wid) + ' · ' + (L.CHEM_N[c] || c), '%', o, x, d, why);
-      if (x === '') delete nv[c]; else nv[c] = x;
-    }
-    if (!changed) return false;
-    if (Object.keys(nv).length) D.c[wid] = Object.assign({ v: nv }, stampBy()); else delete D.c[wid];
+  function setChemPart(wid, part, c, x, d, why, fm) {
+    const D = dayObj(d), old = D.c[wid] || {}, cur = Object.assign({}, old[part] || {}); x = x == null ? '' : String(x).trim();
+    const o = cur[c] ?? ''; if (o === x) return false;
+    sessAudit(fm, `c|${part}|${c}`, wid, (WBY[wid] ? WBY[wid].n : wid) + ' · ' + (L.CHEM_N[c] || c), CHP[part], o, x, d, why);
+    if (x === '') delete cur[c]; else cur[c] = x;
+    const rec = {}; for (const p of Object.keys(CHP)) { const m = p === part ? cur : old[p]; if (m && Object.keys(m).length) rec[p] = m; }
+    if (Object.keys(rec).length) D.c[wid] = Object.assign(rec, stampBy()); else delete D.c[wid];
     mark(`c|${d}|${wid}`); return true;
   }
-  function setTank(tid, x, d, why) {
-    const D = dayObj(d), old = D.d[tid], ov = old ? old.v : ''; x = x == null ? '' : String(x).trim(); if (ov === x) return;
-    const t = TANKS.find(q => q.id === tid); if (ov !== '') audit(tid, 'ديزل ' + (t ? (t.code || t.place) : tid), '%', ov, x, d, why);
-    if (x === '') delete D.d[tid]; else D.d[tid] = Object.assign({ v: x }, stampBy()); mark(`d|${d}|${tid}`);
+  function setTank(tid, x, d, why, fm) {
+    const D = dayObj(d), old = D.d[tid], ov = old ? old.v : ''; x = x == null ? '' : String(x).trim(); if (ov === x) return false;
+    const t = TANKS.find(q => q.id === tid); sessAudit(fm, 'd|' + tid, tid, 'ديزل ' + (t ? (t.code || t.place) : tid), '%', ov, x, d, why);
+    if (x === '') delete D.d[tid]; else D.d[tid] = Object.assign({ v: x }, stampBy()); mark(`d|${d}|${tid}`); return true;
+  }
+  // one chemical box was left (the form or the area's list)
+  const chemBad = (part, x) => part === 'v' ? x == null || x < 0 || x > 100 : part === 'dr' ? x == null || x < 0 || x > 999 || Math.round(x) !== x : x == null || x < 0 || x > 100000;
+  const CHBAD = { v: 'نسبة الكيميكال لازم تبقى من 0 لـ 100', dr: 'عدد البراميل رقم صحيح', rt: 'معدل الاستهلاك رقم (لتر في اليوم)' };
+  function chemSaved(fm, c, part, x) { if (fm) return savedTick(); const mn = L.chemMin(S.cfg, c); toast(part === 'v' && x != null && x < mn ? `اتحفظ. ${L.CHEM_N[c] || c} تحت ${mn}%` : 'اتحفظ'); }
+  function saveChemInput(t) {
+    const fm = formEl.contains(t) ? FM : null; if (fm ? formRo() : !editable()) return;
+    const part = t.dataset.chp, c = t.dataset.chc, v = L.normNum(t.value).trim(), x = L.toNum(v);
+    if (v !== '' && chemBad(part, x)) { t.classList.add('bad'); toast(CHBAD[part]); return; }
+    t.classList.remove('bad');
+    if (setChemPart(t.dataset.chw, part, c, v, viewDay(), fm ? fm.why : undefined, fm)) { save(); chemSaved(fm, c, part, x); }
+  }
+  function saveChemTime(tin) {
+    const fm = formEl.contains(tin) ? FM : null; if (fm ? formRo() : !editable()) return;
+    const v = readTime(tin.id), ins = tin.querySelectorAll('input');
+    if (v === null) { ins.forEach(i => i.classList.add('bad')); return toast(BADTIME); }
+    ins.forEach(i => i.classList.remove('bad'));
+    if (setChemPart(tin.dataset.chw, 'f', tin.dataset.chc, v, viewDay(), fm ? fm.why : undefined, fm)) { save(); chemSaved(fm, tin.dataset.chc, 'f', null); }
   }
   function setPoint(pid, hd, x, d) {
     const D = dayObj(d); const o = D.p[pid] || { h: {} }; const ov = o.h[hd] ?? ''; x = String(x).trim(); if (ov === x) return;
@@ -835,11 +1098,11 @@
     return Math.min(d.getTime(), Date.now());
   }
   // hour 1-12 + minutes + نهارًا (6 الصبح لـ 6 بالليل) / ليلًا (6 بالليل لـ 6 الصبح)
-  function timeInput(id, ts) {
+  function timeInput(id, ts, extra) {
     let h = '', m = '', night;
     const H0 = new Date(ts == null ? Date.now() : ts).getHours(); night = H0 >= 18 || H0 < 6;
     if (ts != null) { const dd = new Date(ts), H24 = dd.getHours(); m = String(dd.getMinutes()).padStart(2, '0'); h = night ? (H24 >= 18 ? H24 - 12 : H24 === 0 ? 12 : H24) : (H24 <= 12 ? H24 : H24 - 12); }
-    return `<div class="tin" id="${id}"><div class="tnum" dir="ltr"><input class="in th" inputmode="numeric" maxlength="2" placeholder="--" value="${h}" aria-label="الساعة"><b>:</b><input class="in tm" inputmode="numeric" maxlength="2" placeholder="00" value="${m}" aria-label="الدقايق"></div>
+    return `<div class="tin" id="${id}"><div class="tnum" dir="ltr"><input class="in th" inputmode="numeric" maxlength="2" placeholder="--" value="${h}" aria-label="الساعة"><b>:</b><input class="in tm" inputmode="numeric" maxlength="2" placeholder="00" value="${m}" aria-label="الدقايق"></div>${extra || ''}
       <div class="seg ampm"><button type="button" data-act="ampm" data-v="d" class="${night ? '' : 'on'}">نهارًا</button><button type="button" data-act="ampm" data-v="n" class="${night ? 'on' : ''}">ليلًا</button></div></div>`;
   }
   function readTime(id) { // '' when empty, null when wrong, else HH:MM (24h)
@@ -935,7 +1198,7 @@
     const d = curDay(), from = V.from || d, to = V.to || d, sel = V.sel || [S.ui.lastArea || SEED.areas[0].id];
     let h = top('إرسال الداتا', 'للشيت، أو PDF على الواتساب، أو Excel') + '<main class="wrap">';
     h += `<div class="card"><h3 style="margin:0 0 6px">الشيت</h3><p style="margin:0 0 10px" data-sync>${syncLine()}</p>${SYNC.url() ? '<button class="btn pen wide" data-act="syncnow">ابعت دلوقتي</button><p class="mute" style="margin-bottom:0">التطبيق بيبعت لوحده كل شوية لما يلاقي نت. الزرار ده لو عاوز تبعت حالًا.</p>' : '<p class="mute" style="margin:0">لما الأدمن يحط رابط الشيت، القرايات هتتبعت لوحدها.</p>'}</div><div class="card">`;
-    h += (canStaff() ? `<div class="two"><div><label class="lab">من يوم</label><input class="in" type="date" id="ef" value="${from}" max="${d}"></div><div><label class="lab">لحد يوم</label><input class="in" type="date" id="et" value="${to}" max="${d}"></div></div>` : `<p class="lab" style="margin:0">داتا النهارده: ${esc(arDay(d))}</p>`) + `
+    h += (canPlan() ? `<div class="two"><div><label class="lab">من يوم</label><input class="in" type="date" id="ef" value="${from}" max="${d}"></div><div><label class="lab">لحد يوم</label><input class="in" type="date" id="et" value="${to}" max="${d}"></div></div>` : `<p class="lab" style="margin:0">داتا النهارده: ${esc(arDay(d))}</p>`) + `
       <p class="lab" style="margin-top:14px">المناطق</p>${SEED.areas.map(a => `<label class="ck"><input type="checkbox" data-ea="${a.id}" ${sel.includes(a.id) ? 'checked' : ''}>${esc(a.n)}</label>`).join('')}
       <button class="btn wa wide" style="margin-top:12px" data-act="pdf">${ic('share')} ابعت PDF على الواتساب</button>
       <button class="btn wa2 wide" style="margin-top:8px" data-act="img">${ic('share')} ابعت صور على الواتساب</button>
@@ -997,44 +1260,33 @@
     try {
       const files = list.map(f => new File([f.bytes], f.name, { type: f.mime }));
       if (!navigator.canShare({ files })) return false;
-      await navigator.share({ files, title: 'AG Survey' }); return true;
-    } catch (e) { if (e && e.name === 'AbortError') return true; return false; }
+      await navigator.share({ files, title: 'AG Survey' }); return 'ok';
+    } catch (e) { if (e && e.name === 'AbortError') return 'cancel'; return false; }
   }
   async function copyText(t) { try { await navigator.clipboard.writeText(t); toast('اتنسخ'); } catch (e) { const x = document.createElement('textarea'); x.value = t; document.body.appendChild(x); x.select(); try { document.execCommand('copy'); toast('اتنسخ'); } catch (e2) { toast('مقدرتش أنسخ'); } x.remove(); } }
   function b64(bytes) { let s = ''; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(s); }
+  // 'ok' shared (or downloaded), 'cancel' the share list was closed, false it did not work
   async function shareFile(name, bytes, mime, noWeb) {
-    if (!noWeb && await webShare([{ name, bytes, mime }])) return;
+    if (!noWeb) { const w = await webShare([{ name, bytes, mime }]); if (w) return w; }
     if (Cap && Cap.Filesystem && Cap.Share) {
-      try { const r = await Cap.Filesystem.writeFile({ path: name, data: b64(bytes), directory: 'CACHE' }); await Cap.Share.share({ title: name, files: [r.uri], dialogTitle: 'ابعت الملف' }); return; }
-      catch (e) { if (e && /cancel/i.test(String(e.message || e))) return; toast('مقدرتش أشارك الملف: ' + (e.message || e)); return; }
+      try { const r = await Cap.Filesystem.writeFile({ path: name, data: b64(bytes), directory: 'CACHE' }); await Cap.Share.share({ title: name, files: [r.uri], dialogTitle: 'ابعت الملف' }); return 'ok'; }
+      catch (e) { if (e && /cancel/i.test(String(e.message || e))) return 'cancel'; toast('مقدرتش أشارك الملف: ' + (e.message || e)); return false; }
     }
     const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([bytes], { type: mime })); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    return 'ok';
   }
 
   // ---------------- settings / admin ----------------
   function vSettings() {
-    const u = me();
+    const u = me(), q = S.uprof[u.u];
     let h = top('الإعدادات', 'نسخة ' + VERSION) + '<main class="wrap">';
-    h += `<div class="card"><h3 style="margin:0 0 8px">${esc(u.name)}</h3><div class="kv"><b>اسم المستخدم</b><span dir="ltr">${esc(u.u)}</span><b>الرقم الوظيفي</b><span>${esc(u.emp)}</span><b>الموبايل</b><span dir="ltr">${esc(u.phone)}</span></div>
-      <div class="btns" style="margin-top:12px"><button class="btn" data-act="logout">تغيير المستخدم</button></div></div>`;
-    if ((S.errs || []).length) h += `<div class="card"><h3 style="margin:0 0 6px">سجل الأخطاء (${S.errs.length})</h3><p class="mute" style="margin-top:0">لو التطبيق عمل مشكلة، ابعتلي السجل ده.</p><button class="btn wide" data-act="errsend">ابعت سجل الأخطاء</button></div>`;
+    h += `<div class="card"><h3 style="margin:0 0 8px">${esc(u.name)}</h3><div class="kv"><b>اسم المستخدم</b><span dir="ltr">${esc(u.u)}</span><b>الرقم الوظيفي</b><span>${esc(u.emp || '—')}</span><b>الموبايل</b><span dir="ltr">${esc(u.phone || '—')}</span></div>
+      ${q && q.st === 'wait' ? `<p class="banner info" style="margin:10px 0 0">طلب تعديل بياناتك مستني موافقة الأدمن.</p>` : q && q.st === 'no' ? `<p class="banner" style="margin:10px 0 0">الأدمن رفض طلب تعديل بياناتك اللي بعته. <button class="ib3 xs" data-act="profdis" aria-label="اقفل">×</button></p>` : ''}
+      <div class="btns" style="margin-top:12px"><button class="btn" data-act="pinchg">غيّر الباسورد</button>${isAdmin() ? '' : '<button class="btn" data-act="profreq">عدّل بياناتي</button>'}<button class="btn" data-act="logout">خروج</button></div></div>`;
+    if (isAdmin()) { const n = nReqs(); h += `<div class="card"><h3 style="margin:0 0 8px">الأدمن</h3><div class="btns"><button class="btn pen" data-act="go" data-v="users">المستخدمين${n ? ` <b class="nbdg">${n}</b>` : ''}</button><button class="btn" data-act="go" data-v="admin">${ic('shield')} الآبار والإعدادات</button><button class="btn" data-act="go" data-v="audit">سجل التعديلات</button></div></div>`; }
+    if ((S.errs || []).length) h += `<div class="card"><h3 style="margin:0 0 6px">سجل الأخطاء (${S.errs.length})</h3><p class="mute" style="margin-top:0">التطبيق قابل مشكلة. ابعتلي السجل ده، وبعد ما يتبعت بيتمسح.</p><button class="btn wide" data-act="errsend">ابعت سجل الأخطاء</button></div>`;
     h += `<div class="card"><h3 style="margin:0 0 6px">نسخة احتياطية</h3><p class="mute" style="margin-top:0">${SYNC.url() ? 'الداتا بتتبعت للشيت لوحدها. النسخة دي لو حبيت تحتفظ بملف على جنب.' : 'لحد ما الموبايل يتربط بالشيت، الداتا عليه بس. ابعت نسخة كل كام يوم.'}</p><button class="btn wide" data-act="backup">ابعت نسخة احتياطية</button></div>`;
-    h += isAdmin() ? `<div class="card"><h3 style="margin:0 0 8px">الأدمن</h3><div class="btns"><button class="btn pen" data-act="go" data-v="admin">${ic('shield')} الآبار والإعدادات</button><button class="btn" data-act="go" data-v="audit">سجل التعديلات</button></div><button class="btn wide" style="margin-top:8px" data-act="adminoff">اقفل وضع الأدمن</button></div>`
-      : `<button class="btn wide" data-act="adminon">${ic('shield')} وضع الأدمن</button>`;
     return h + '</main>' + tabs('settings');
-  }
-  function adminOn() {
-    if (!S.admin && SYNC.url()) return modal(`<h3>باسورد الأدمن</h3><p>الباسورد بيتحط من الشيت مرة واحدة: افتح الشيت ← القايمة <b>سيرفاي</b> ← <b>باسورد الأدمن</b>.</p><p class="mute">بعدها اضغط "جرّب دلوقتي" والموبايل فاتح نت.</p><p data-sync>${syncLine()}</p><div class="btns"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="admretry">جرّب دلوقتي</button></div>`);
-    const first = !S.admin;
-    modal(`<h3>${first ? 'اختار باسورد الأدمن' : 'باسورد الأدمن'}</h3><p class="mute">${first ? '6 أرقام. أي حد معاه الباسورد ده يقدر يعدل الآبار والأيام القديمة.' : '6 أرقام'}</p><div class="pinrow"><input id="ap" type="password" inputmode="numeric" maxlength="6"></div>${first ? '<div class="pinrow"><input id="ap2" type="password" inputmode="numeric" maxlength="6" placeholder="تأكيد"></div>' : ''}
-      <div class="btns"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="adminok">دخول</button></div>`);
-  }
-  async function adminOk() {
-    const p = L.normNum($('#ap').value || ''); if (!/^\d{6}$/.test(p)) return toast('الباسورد 6 أرقام');
-    if (!S.admin && SYNC.url()) return adminOn();
-    if (!S.admin) { if (p !== L.normNum($('#ap2').value || '')) return toast('الباسوردين مش زي بعض'); S.admin = await sha('wsadmin:' + p); audit('admin', 'الأدمن', 'باسورد', '', 'اتعمل', curDay()); save(); }
-    else if (S.admin !== await sha('wsadmin:' + p)) { $('#ap').value = ''; return toast('الباسورد غلط'); }
-    ADMIN_ON = true; closeModal(); V = { v: 'admin' }; render(); publishSeed();
   }
   function vAdmin() {
     const aid = V.a || SEED.areas[0].id, q = (V.q || '').trim().toUpperCase();
@@ -1049,10 +1301,8 @@
     h += `<div class="stabs">${SEED.areas.map(a => `<button class="stab ${a.id === aid ? 'on' : ''}" data-act="aarea" data-a="${a.id}">${esc(a.n)}</button>`).join('')}</div>
       <div class="search"><input id="aq" placeholder="دوّر على بير" value="${esc(V.q || '')}" dir="ltr"></div>
       <p class="mute" style="margin:10px 2px 0">"يظهر" يعني الفنيين يشوفوه في قايمة المنطقة. البير المخفي بيفضل بالداتا بتاعته وترجعه في أي وقت. تغيير النوع بيغيّر الخانات اللي الفني بيشوفها. ${SYNC.url() ? 'أي تغيير هنا بيوصل لكل الموبايلات أول ما يتبعت للشيت.' : 'التغيير هيوصل لكل الموبايلات لما الموبايل ده يتربط بالشيت.'}</p><div class="card">`;
-    const us = Object.values(S.users);
-    h += `<h3 style="margin:4px 0 8px">${SYNC.url() ? 'المستخدمين' : 'المستخدمين على الموبايل ده'}</h3>${us.map(u => `<div class="arow"><div class="nm">${esc(u.name)}<small dir="ltr">${esc(u.u)} · ${esc(u.phone)}</small></div><select class="in tsel" data-role="${esc(u.u)}"><option value="tech" ${!u.role || u.role === 'tech' ? 'selected' : ''}>فني</option><option value="lead" ${u.role === 'lead' ? 'selected' : ''}>رئيس ورشة (توزيعة الأفراد)</option><option value="eng" ${u.role === 'eng' ? 'selected' : ''}>مهندس (الصيانات والشغل والمهام)</option></select>${u.u === S.me ? '' : `<button class="ib3" data-act="udel" data-u="${esc(u.u)}" aria-label="امسح ${esc(u.name)}">×</button>`}</div>`).join('')}</div><div class="card"><h3 style="margin:4px 0 8px">الآبار</h3>`;
     const ws = WELLS.filter(w => w.a === aid && (!q || w.n.toUpperCase().includes(q)));
-    h += `<h3 style="margin:16px 0 8px">الآبار <small class="mute">بترتيب الطريق</small></h3><button class="btn pen wide" style="margin-bottom:8px" data-act="nwell">+ بير جديد في ${esc(areaOf(aid).n)}</button>`;
+    h += `<h3 style="margin:4px 0 8px">الآبار <small class="mute">بترتيب الطريق</small></h3><button class="btn pen wide" style="margin-bottom:8px" data-act="nwell">+ بير جديد في ${esc(areaOf(aid).n)}</button>`;
     h += ws.map(w => `<div class="arow"><div class="nm">${esc(w.n)}<small>${w.add ? 'بير جديد' : w.geo ? 'اتنسب بالإحداثيات' : 'من ورقة السيرفاي'}${(w.ch || []).length ? ' · كيميكال ' + w.ch.length : ''}</small></div>
       <select class="in tsel" data-type="${w.id}">${L.TYPE_ORDER.map(t => `<option value="${t}" ${w.t === t ? 'selected' : ''}>${t === 'GL' ? 'Gas Lift' : t}</option>`).join('')}</select>
       <label class="swl">متقطع<span class="sw"><input type="checkbox" data-int="${w.id}" ${w.int ? 'checked' : ''}><i></i></span></label>
@@ -1157,11 +1407,13 @@
 
   // ---------------- render + events ----------------
   function render() {
-    if (!me()) { app.innerHTML = vLogin(); return; }
+    if (!me()) { stopGeo(); app.innerHTML = vLogin(); return; }
+    if (isPending(me())) { stopGeo(); WAITING = true; app.innerHTML = vWait(); return; }
     if (!(V.v === 'area' && (V.tab || 'wells') === 'wells' && S.ui.mode === 'map')) stopGeo();
     const v = V.v;
-    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? vFollow() : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && isAdmin() ? vAdmin() : v === 'audit' && isAdmin() ? vAudit() : vHome();
+    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? vFollow() : v === 'staff' ? vStaff() : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && isAdmin() ? vAdmin() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
   }
+  let WAITING = false; // the waiting screen of a new account was shown
   function go(v, extra) { V = Object.assign({ v }, extra || {}); render(); window.scrollTo(0, 0); }
 
   document.addEventListener('click', e => {
@@ -1196,11 +1448,14 @@
         if (u && !/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(u)) return toast('الرابط لازم يبقى بالشكل ده: https://script.google.com/macros/s/…/exec');
         audit('sync', 'رابط الشيت', 'URL', SYNC.url() ? 'كان فيه رابط' : '', u ? 'اتحط رابط' : 'اتشال', curDay()); SYNC.setUrl(u); toast(u ? 'اتحفظ. بيجرب يبعت…' : 'اتشال الرابط'); if (u) SYNC.run(true); return render();
       }
-      case 'errsend': return shareFile(`well-survey-errors_${curDay()}.txt`, new TextEncoder().encode(`v${VERSION}\n` + (S.errs || []).map(x => `${L.stamp(x.t)} [${x.v}] ${x.m}`).join('\n')), 'text/plain');
+      case 'errsend': { const n = (S.errs || []).length; return shareFile(`ag-survey-errors_${curDay()}.txt`, new TextEncoder().encode(`v${VERSION}\n` + (S.errs || []).map(x => `${L.stamp(x.t)} [${x.v}] ${x.m}`).join('\n')), 'text/plain').then(r => { if (r === 'ok') { S.errs = (S.errs || []).slice(n); save(); render(); toast('اتبعت السجل واتمسح من الموبايل'); } }); }
       case 'well': return openWell(b.dataset.w);
       case 'fclose': return closeForm();
-      case 'fsave': return saveForm();
-      case 'csg': if (!FM) return; FM.v.CSG = FM.v.CSG === b.dataset.v ? '' : b.dataset.v; FM.dirty = true; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.v === FM.v.CSG)); return;
+      case 'wview': closeModal(); return openWell(b.dataset.w, null);
+      case 'csg': if (!FM || formRo()) return; FM.v.CSG = FM.v.CSG === b.dataset.v ? '' : b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.v === FM.v.CSG)); return commitReading();
+      case 'chnow': { const tin = document.getElementById(`cft-${b.dataset.chw}-${b.dataset.chc}`); if (!tin) return; const now = new Date(), H0 = now.getHours(), night = H0 >= 18 || H0 < 6;
+        tin.querySelector('.th').value = night ? (H0 >= 18 ? H0 - 12 : H0 === 0 ? 12 : H0) : (H0 <= 12 ? H0 : H0 - 12); tin.querySelector('.tm').value = String(now.getMinutes()).padStart(2, '0');
+        tin.querySelectorAll('.ampm button').forEach(x => x.classList.toggle('on', x.dataset.v === (night ? 'n' : 'd'))); return saveChemTime(tin); }
       case 'down': return downBox(FM.w);
       case 'mdown': { const m = planFor(viewDay(), FM.w.a).maint.find(x => x.id === b.dataset.i); return downBox(FM.w, { r: 'Generator صيانة', mid: b.dataset.i, o: m && m.n ? m.n : '' }); }
       case 'wpk': return wpPick(b.dataset.w);
@@ -1221,7 +1476,7 @@
       case 'install': { const e = window.__installEvt; if (e) { e.prompt(); e.userChoice.finally(() => { window.__installEvt = null; render(); }); } return; }
       case 'noinst': S.ui.noInstall = 1; save(); return render();
       case 'weblinkcopy': return copyText(webLink());
-      case 'udel': { if (!isAdmin()) return; const u = S.users[b.dataset.u]; if (!u) return; if (u.u === S.me) return toast('مينفعش تمسح نفسك');
+      case 'udel': { if (!isAdmin()) return; const u = S.users[b.dataset.u]; if (!u) return; closeModal(); if (u.u === S.me || u.u === ADM()) return toast('مينفعش تمسح حساب الأدمن');
         return confirmBox(`تمسح ${u.name} من التطبيق خالص؟ اسمه ورقمه هيتشالوا من كل الموبايلات ومن الشيت. القرايات اللي كتبها هتفضل من غير اسم.`, 'امسح', () => { scrubUser(u.u); audit('user', '', 'مسح مستخدم', '', '', curDay()); save(); render(); toast('اتمسح'); }); }
       case 'stcopyall': { if (!canStaff()) return; const d = viewDay(); for (const a of SEED.areas) { const y = planFor(L.addDays(d, -1), a.id).staff; if (y.length && !planFor(d, a.id).staff.length) { planObj(d, a.id).staff = y.slice(); mark(`ps|${d}|${a.id}`); } }
         if (!jobsFor(d).length) for (const j of jobsFor(L.addDays(d, -1))) { S.jobs[d] = S.jobs[d] || []; const n = Object.assign({ id: uid(), k: j.k, staff: j.staff.slice() }, stampBy()); S.jobs[d].push(n); mark(`pj|${d}|${n.id}`); }
@@ -1236,24 +1491,41 @@
       case 'evadd': return evBox(null);
       case 'evedit': return evBox(b.dataset.e);
       case 'evok': return evOk();
-      case 'ampm': b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); return;
+      case 'ampm': { b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); const tin = b.closest('.tin[data-chp]'); if (tin && readTime(tin.id)) saveChemTime(tin); return; }
       case 'evdel': return evDel();
       case 'intclose': return intClose();
       case 'mclose': return closeModal();
       case 'mok': { const cb = MCB; if (cb) { closeModal(); cb(); } return; }
       case 'login': return doLogin();
       case 'register': return doRegister();
-      case 'toreg': V.reg = 1; return render();
-      case 'tolog': V.reg = 0; return render();
-      case 'logout': S.me = null; ADMIN_ON = false; VDAY = null; save(); V = { v: 'home' }; return render();
+      case 'toreg': V = { v: 'home', auth: 'reg' }; render(); return window.scrollTo(0, 0);
+      case 'tolog': V = { v: 'home', lu: V.lu }; render(); return window.scrollTo(0, 0);
+      case 'toforgot': V = { v: 'home', auth: 'forgot', lu: (($('#lu') || {}).value || '').trim() }; return render();
+      case 'forgot1': return forgot1();
+      case 'forgot2': return forgot2();
+      case 'lupick': { const x = S.users[b.dataset.u]; if (!x) return; V.lu = x.u; const i = $('#lu'); if (i) i.value = x.u; const p = $('#lp'); if (p) p.focus(); return; }
+      case 'loginas': { const u = b.dataset.u; if (!PICK || !PICK.has(u)) return closeModal(); return loginAs(u); }
+      case 'activate': return doActivate();
+      case 'logout': if (FM) closeForm(); S.me = null; VDAY = null; save(); V = { v: 'home' }; return render();
+      case 'pinchg': return pinBox();
+      case 'pinok': return pinOk();
+      case 'profreq': return profBox();
+      case 'profok': return profOk();
+      case 'profcancel': case 'profdis': { const u = me(); if (!u || !S.uprof[u.u]) return closeModal(); delete S.uprof[u.u]; mark('uq|' + u.u); save(); closeModal(); render(); return SYNC.run(false); }
+      case 'uedit': return userBox(b.dataset.u);
+      case 'ueditok': return userEditOk(b.dataset.u);
+      case 'ucode': closeModal(); return sendCode(b.dataset.u, b.dataset.p === 'reset' ? 'reset' : 'act');
+      case 'uact': { const u = S.users[b.dataset.u]; if (!u || !isAdmin()) return; return confirmBox(`تفعّل حساب ${u.name} من غير كود؟ اعمل كده لو متأكد إنه هو صاحب الرقم.`, 'فعّل', () => { u.st = 'ok'; u.act = { t: Date.now(), by: S.me }; mark('u|' + u.u); if (S.ucode[u.u]) { delete S.ucode[u.u]; mark('uc|' + u.u); } audit('user', u.u, 'تفعيل الحساب', '', 'من الأدمن', curDay()); save(); render(); SYNC.run(false); toast('اتفعّل'); }); }
+      case 'uqok': case 'uqno': { const id = b.dataset.u, u = S.users[id], q = S.uprof[id]; if (!u || !q || !isAdmin()) return;
+        if (a === 'uqok') { if (findAccounts(q.phone).some(x => x.u !== id)) return toast('الرقم الجديد عليه حساب تاني');
+          for (const [f, l] of PROF) if (String(u[f] ?? '') !== String(q[f] ?? '')) { audit('user', id, l, u[f] ?? '', q[f], curDay()); u[f] = q[f]; }
+          delete u._seed; mark('u|' + id); }
+        S.uprof[id] = Object.assign({}, q, { st: a === 'uqok' ? 'ok' : 'no', at: Date.now(), by: S.me }); mark('uq|' + id); save(); render(); SYNC.run(false); return toast(a === 'uqok' ? 'اتغيرت البيانات' : 'اترفض الطلب'); }
+      case 'ureqdel': { const id = b.dataset.u; if (!isAdmin() || !S.ureq[id]) return; delete S.ureq[id]; mark('ur|' + id); save(); return render(); }
       case 'sk': V.sk = b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); return;
       case 'ssave': return saveSample();
       case 'xlsx': return doExport();
       case 'backup': return backup();
-      case 'adminon': return adminOn();
-      case 'adminok': return adminOk();
-      case 'admretry': { b.disabled = true; b.textContent = 'بيتصل…'; SYNC.run(false).then(() => { closeModal(); if (S.admin) adminOn(); else toast(SYNC.status().err ? 'مقدرش يتصل: ' + SYNC.status().err : 'لسه مفيش باسورد في الشيت'); }); return; }
-      case 'adminoff': ADMIN_ON = false; VDAY = null; return go('settings');
       case 'aarea': V.a = b.dataset.a; V.q = ''; return render();
       case 'cfgsave': {
         const h = parseInt(L.normNum($('#ch').value), 10), dm = parseFloat(L.normNum($('#cd').value)), g = parseFloat(L.normNum($('#cg').value));
@@ -1268,31 +1540,38 @@
   });
   document.addEventListener('input', e => {
     const t = e.target;
-    if (t.dataset.f && FM) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; FM.v[t.dataset.f] = n; FM.dirty = true; if (['DS', 'DIFF', 'GINJ', 'INJ'].includes(t.dataset.f)) refreshCalc(); return; }
-    if (t.dataset.ftk && FM) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; FM.tv[t.dataset.ftk] = n; FM.dirty = true; const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x <= 100 && x < S.cfg.dieselMin); return; }
-    if (t.dataset.fch && FM) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; FM.cv[t.dataset.fch] = n; FM.dirty = true; const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x >= 0 && x <= 100 && x < L.chemMin(S.cfg, t.dataset.fch)); return; }
-    if (t.dataset.chw) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x >= 0 && x <= 100 && x < L.chemMin(S.cfg, t.dataset.chc)); return; }
+    if (t.dataset.f && FM) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; FM.v[t.dataset.f] = n; if (['DS', 'DIFF', 'GINJ', 'INJ'].includes(t.dataset.f)) refreshCalc(); return; }
+    if (t.dataset.ftk && FM) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x <= 100 && x < S.cfg.dieselMin); return; }
+    if (t.dataset.chw && t.dataset.chp) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; const x = L.toNum(n), part = t.dataset.chp; t.classList.toggle('bad', n.trim() !== '' && chemBad(part, x)); if (part === 'v') t.classList.toggle('low', x != null && x >= 0 && x <= 100 && x < L.chemMin(S.cfg, t.dataset.chc)); return; }
+    if (t.closest && t.closest('.tin[data-chp]')) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; t.classList.remove('bad'); return; }
     if (t.id === 'ppq' && PP) { PP.q = t.value; ppRefresh(true); return; }
     if (t.id === 'wpq' && WP) { WP.q = t.value; wpRefresh(true); return; }
     if (t.id === 'sq') { V.sq = t.value; V.spt = ''; const r = $('#sres'); if (r) r.innerHTML = sampleResults(V.v === 'area' ? V.a : null); return; }
-    if (t.id === 'fn' && FM) { FM.n = t.value; FM.dirty = true; return; }
+    if (t.id === 'fn' && FM) { FM.n = t.value; return; }
     if (t.dataset.pt || t.dataset.tk) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; if (t.dataset.tk) { const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x <= 100 && x < S.cfg.dieselMin); } return; }
     if (t.id === 'q') { V.q = t.value; const pos = t.selectionStart; render(); const q = $('#q'); if (q) { q.focus(); q.setSelectionRange(pos, pos); } return; }
-    if (t.id === 'aq') { V.q = t.value; const pos = t.selectionStart; render(); const q = $('#aq'); if (q) { q.focus(); q.setSelectionRange(pos, pos); } return; }
+    if (t.id === 'aq' || t.id === 'uq') { V.q = t.value; const pos = t.selectionStart, id = t.id; render(); const q = $('#' + id); if (q) { q.focus(); q.setSelectionRange(pos, pos); } return; }
+    if (t.id === 'lu') { V.lu = t.value; return; }
   });
   document.addEventListener('change', e => {
     const t = e.target;
     if (t.dataset.pt) { const x = L.toNum(t.value); if (t.value !== '' && x == null) { toast('اكتب رقم'); return; } setPoint(t.dataset.pt, t.dataset.h, t.value, viewDay()); return toast('اتحفظ'); }
-    if (t.dataset.tk) { const x = L.toNum(t.value); if (t.value !== '' && (x == null || x < 0 || x > 100)) { toast('نسبة الديزل لازم تبقى من 0 لـ 100'); t.focus(); return; } setTank(t.dataset.tk, t.value, viewDay()); save(); return toast(x != null && x < S.cfg.dieselMin ? `اتحفظ. الديزل تحت ${S.cfg.dieselMin}%` : 'اتحفظ'); }
-    if (t.dataset.chw) { const x = L.toNum(t.value), c = t.dataset.chc, mn = L.chemMin(S.cfg, c); if (t.value !== '' && (x == null || x < 0 || x > 100)) { toast('نسبة الكيميكال لازم تبقى من 0 لـ 100'); t.focus(); return; } setChem(t.dataset.chw, { [c]: t.value }, viewDay()); save(); return toast(x != null && x < mn ? `اتحفظ. ${L.CHEM_N[c] || c} تحت ${mn}%` : 'اتحفظ'); }
+    if (t.dataset.tk) { const x = L.toNum(t.value); if (t.value !== '' && (x == null || x < 0 || x > 100)) { t.classList.add('bad'); return toast('نسبة الديزل لازم تبقى من 0 لـ 100'); } t.classList.remove('bad'); if (!setTank(t.dataset.tk, t.value, viewDay())) return; save(); return toast(x != null && x < S.cfg.dieselMin ? `اتحفظ. الديزل تحت ${S.cfg.dieselMin}%` : 'اتحفظ'); }
+    if (t.dataset.chw && t.dataset.chp) return saveChemInput(t);
+    { const tin = t.closest && t.closest('.tin[data-chp]'); if (tin) return saveChemTime(tin); }
+    // the well screen: each box is saved when it is left
+    if (FM && formEl.contains(t)) {
+      if (t.dataset.f || t.id === 'fn') return commitReading();
+      if (t.dataset.ftk) { if (formRo()) return; const v = L.normNum(t.value).trim(), x = L.toNum(v); if (v !== '' && (x == null || x < 0 || x > 100)) { t.classList.add('bad'); return toast('نسبة الديزل لازم تبقى من 0 لـ 100'); }
+        t.classList.remove('bad'); if (setTank(t.dataset.ftk, v, viewDay(), FM.why, FM)) { save(); savedTick(); if (x != null && x < S.cfg.dieselMin) toast(`الديزل تحت ${S.cfg.dieselMin}%`); } return; }
+    }
     if (t.id === 'vday') { VDAY = t.value && t.value !== curDay() ? t.value : null; return render(); }
     if (t.dataset.vis) return setEdit(t.dataset.vis, 'hid', t.checked ? 0 : 1);
     if (t.dataset.int) return setEdit(t.dataset.int, 'int', t.checked ? 1 : 0);
     if (t.dataset.type) { setEdit(t.dataset.type, 't', t.value); return toast('اتغير النوع'); }
     if (t.dataset.task) { const aid = t.dataset.a || V.a, pl = planObj(viewDay(), aid), x = pl.tasks.find(q => q.id === t.dataset.task); if (!x) return; x.done = t.checked ? stampBy() : null; mark(`pt|${viewDay()}|${aid}|${x.id}`); audit('plan', areaOf(aid).n, 'مهمة', t.checked ? '' : 'خلصت', t.checked ? 'خلصت: ' + x.x : x.x, viewDay()); save(); return render(); }
     if (t.id === 'jk') { const w = $('#jkw'); if (w) { w.hidden = t.value !== '__o'; if (!w.hidden) $('#jko').focus(); } return; }
-    if (t.id === 'lu') { const o = $('#lu2'); if (o) { o.hidden = t.value !== ''; if (!o.hidden) o.focus(); } return; }
-    if (t.dataset.role) { const u = S.users[t.dataset.role]; if (!u) return; audit('user', u.u, 'الصلاحية', u.role || 'tech', t.value, curDay()); u.role = t.value; mark('u|' + u.u); save(); return toast('اتغيرت الصلاحية'); }
+    if (t.dataset.role) { const u = S.users[t.dataset.role]; if (!u || !isAdmin() || u.u === ADM() || !ROLES.some(r => r[0] === t.value)) return; audit('user', u.u, 'الوظيفة', roleName(u), (ROLES.find(r => r[0] === t.value) || ROLES[0])[1], curDay()); u.role = t.value; mark('u|' + u.u); save(); SYNC.run(false); return toast('اتغيرت الوظيفة'); }
   });
   // map gestures: one finger moves the map, two fingers zoom and turn it
   const PTRS = new Map(); let GST = null, RAF = 0, NOCLICK = false;
@@ -1323,13 +1602,43 @@
   document.addEventListener('pointerup', pointerEnd); document.addEventListener('pointercancel', pointerEnd);
   document.addEventListener('click', e => { if (NOCLICK && e.target.closest('svg.map')) { e.stopPropagation(); e.preventDefault(); } }, true);
   document.addEventListener('wheel', e => { if (!MAPV || !e.target.closest('svg.map')) return; e.preventDefault(); const p = svgPt(e), an = mapInv(p[0], p[1]); MAPV.z = Math.max(0.5, Math.min(40, MAPV.z * (e.deltaY < 0 ? 1.2 : 1 / 1.2))); keepAnchor(an, p); redraw(); }, { passive: false });
-  document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'lp') doLogin(); });
+  document.addEventListener('keydown', e => { if (e.key !== 'Enter') return; const id = e.target.id; if (id === 'lp') doLogin(); else if (id === 'ac') doActivate(); else if (id === 'fk2') forgot2(); else if (id === 'fu') forgot1(); });
   window.addEventListener('popstate', () => { if (FM) closeForm(); });
   // Android back button
-  if (Cap && Cap.App) Cap.App.addListener('backButton', () => { if (!modalEl.hidden) return closeModal(); if (FM) return closeForm(); if (V.v !== 'home' && me()) return go(V.v === 'admin' || V.v === 'audit' ? 'settings' : 'home'); Cap.App.exitApp(); });
+  if (Cap && Cap.App) Cap.App.addListener('backButton', () => { if (!modalEl.hidden) return closeModal(); if (FM) return closeForm();
+    if (!me()) { if (V.auth) { V = { v: 'home', lu: V.lu }; return render(); } return Cap.App.exitApp(); }
+    if (V.v !== 'home' && !isPending(me())) return go(['admin', 'audit', 'users'].includes(V.v) ? 'settings' : V.v === 'staff' ? 'follow' : 'home'); Cap.App.exitApp(); });
   // a new production day starts while the app is open
   setInterval(() => { if (!FM && modalEl.hidden && me() && !VDAY && document.activeElement === document.body) render(); }, 60000);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) saveNow(); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { flushForm(); bgStash(); saveNow(); } });
+
+  // ---------------- sending in the background (Android) ----------------
+  // the app goes to the background with changes still waiting: the phone keeps them and sends them by itself
+  // as soon as it has a network, also if the app is closed. When the app is back, it takes over again.
+  function BG() {
+    if (window.CONFIG && CONFIG.web) return null; const C0 = window.Capacitor; if (!C0) return null;
+    if (C0.Plugins && C0.Plugins.BgSync) return C0.Plugins.BgSync;
+    try { if (C0.isPluginAvailable && C0.isPluginAvailable('BgSync') && C0.registerPlugin) return BG.p || (BG.p = C0.registerPlugin('BgSync')); } catch (e) { }
+    return null;
+  }
+  const within = (p, ms) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('timeout')), ms))]);
+  async function bgStash() {
+    const B = BG(); if (!B || !window.SYNC || !S.sync || !me()) return;
+    const ob = SYNC.outbox(1000);
+    if (!ob) { if (S.sync.bg) { S.sync.bg = null; within(B.take(), 3000).catch(() => { }); } return; }
+    const id = uid(); S.sync.bg = { id, keys: ob.keys, t: Date.now() };
+    try { await within(B.stash({ id, url: ob.url, body: ob.body }), 5000); } catch (e) { S.sync.bg = null; logErr('bg stash: ' + (e && e.message || e)); }
+    saveNow();
+  }
+  let BGT = null;
+  function bgTake() {
+    const B = BG(); if (!B || !S.sync || !S.sync.bg) return Promise.resolve();
+    return BGT || (BGT = (async () => {
+      const bg = S.sync.bg;
+      try { const r = await within(B.take(), 4000); if (bg && r && Array.isArray(r.sent) && r.sent.includes(bg.id)) SYNC.sentBy(bg.keys); } catch (e) { }
+      S.sync.bg = null; save();
+    })().finally(() => { BGT = null; }));
+  }
 
   function syncMeta(k, d) {
     if (d == null || typeof d !== 'object' || Array.isArray(d)) return d;
@@ -1349,7 +1658,12 @@
   }
   function syncDone(r) {
     if (r.cfgChanged) rebuildWells();
-    if (r.got && !FM && modalEl.hidden && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) render();
+    if (r.usersChanged) seedAdmin();
+    const quiet = !FM && modalEl.hidden && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName));
+    if (WAITING && me() && !isPending(me())) { WAITING = false; V = { v: 'home' }; render(); toast('اتفعّل حسابك. أهلاً ' + firstName(me().name)); }
+    else if (!me() && !app.querySelector('.auth')) { if (FM) { FM = null; formEl.hidden = true; formEl.innerHTML = ''; document.body.classList.remove('lock'); } closeModal(); V = { v: 'home' }; render(); }   // this account was removed on another phone
+    else if (r.got && me() && quiet) render();
+    if (isAdmin()) { const n = nReqs(); if (n > (S.ui.nreq || 0)) toast(n === 1 ? 'فيه طلب جديد في المستخدمين' : `فيه ${n} طلبات في المستخدمين`); if (n !== (S.ui.nreq || 0)) { S.ui.nreq = n; save(); } }
     document.querySelectorAll('[data-sync]').forEach(el => el.innerHTML = syncLine());
     if (r.got) checkAlerts();
     if (SEED_NEW) { SEED_NEW = false; toast('بيانات الآبار اتحدثت. اقفل البرنامج وافتحه تاني'); }
@@ -1365,22 +1679,26 @@
     return `<span class="sy ok">${st.pending ? `${st.pending} مستني يتبعت` : 'كله اتبعت'}${st.last ? ' · آخر مرة ' + hmA(st.last) : ''}</span>`;
   }
   // keep the last errors so they can be sent from the settings screen
-  function logErr(m) { try { S.errs = (S.errs || []).concat([{ t: Date.now(), m: String(m).slice(0, 400), v: V.v + '/' + (V.tab || '') + '/' + S.ui.mode }]).slice(-30); save(); } catch (e) { } }
-  window.addEventListener('error', e => { logErr((e.message || 'error') + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno); toast('حصلت مشكلة. اتسجلت في الإعدادات.'); });
+  const HARMLESS = /cancel(l)?ed|AbortError|ResizeObserver loop|^Script error\.?/i;
+  function logErr(m) { try { m = String(m); if (HARMLESS.test(m)) return; S.errs = (S.errs || []).concat([{ t: Date.now(), m: m.slice(0, 400), v: V.v + '/' + (V.tab || '') + '/' + S.ui.mode }]).slice(-30); save(); } catch (e) { } }
+  window.addEventListener('error', e => { const m = (e.message || 'error') + ' @' + (e.filename || '').split('/').pop() + ':' + e.lineno; if (HARMLESS.test(m)) return; logErr(m); toast('حصلت مشكلة. اتسجلت في الإعدادات.'); });
   window.addEventListener('unhandledrejection', e => { logErr('promise: ' + (e.reason && e.reason.message || e.reason)); });
   (async function init() {
     const st = await loadState(); if (st && st.v === 1) S = Object.assign(fresh(), st, { cfg: Object.assign(fresh().cfg, st.cfg || {}), ui: Object.assign(fresh().ui, st.ui || {}) });
     S.ui.mode = 'type'; // the app opens on the list by type
+    if (S.ui.errv !== VERSION) { S.errs = []; S.ui.errv = VERSION; } // a new version starts with an empty error log
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { }
     if (!S.ui.here) S.ui.here = Object.keys(S.users);
-    SYNC.init({ getS: () => S, save, meta: syncMeta, onDone: syncDone, onGone, seedPart, onSeed, cutDay: () => L.addDays(curDay(), -60), version: VERSION });
+    for (const m of ['ucode', 'ureq', 'uprof']) if (!S[m] || typeof S[m] !== 'object') S[m] = {};
+    delete S.admin; seedAdmin();
+    SYNC.init({ getS: () => S, save, meta: syncMeta, onDone: syncDone, onGone, seedPart, onSeed, cutDay: () => L.addDays(curDay(), -60), version: VERSION, bgOn: () => !!BG(), before: bgTake });
     for (const h of GONE0) if (!(S.gone && S.gone[h])) { const x = Object.keys(S.users).find(u => L.uhash(u) === h); if (x) { scrubUser(x); save(); } else { S.gone = S.gone || {}; S.gone[h] = 1; } } // a phone that never had the person only remembers the hash
     // forget "seen" marks of plan items older than a few days
     { const keep = new Set(); for (let i = 0; i < 4; i++) for (const a of SEED.areas) for (const x of planItems(L.addDays(curDay(), -i), a.id)) keep.add(x.it.id);
       for (const m of ['seen', 'alerted']) if (S.ui[m]) for (const id in S.ui[m]) if (!keep.has(id)) delete S.ui[m][id]; }
     rebuildWells(); render(); setTimeout(checkAlerts, 1500);
-    if (me() && me().role === 'eng') publishSeed();
+    if (me() && (isAdmin() || me().role === 'eng')) publishSeed();
     window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); window.__installEvt = e; if (V.v === 'home' && !FM) render(); });
   })();
-  window.__ws = { get S() { return S; }, get MAPV() { return MAPV; }, L, rebuildWells, render, timeInput, readTime, saveNow };
+  window.__ws = { get S() { return S; }, get MAPV() { return MAPV; }, get FM() { return FM; }, get WELLS() { return WELLS; }, get SEEDX() { return SEEDX(); }, L, rebuildWells, render, timeInput, readTime, saveNow, isAdmin, isPending, nReqs };
 })();
