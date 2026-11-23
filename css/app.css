@@ -406,3 +406,9 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .urole{flex:1;color:var(--mute);font-size:14px;font-weight:600}
 .chtw .tin .seg.ampm{flex-basis:100%}
 .chnow{min-height:46px;border-style:dashed;border-color:var(--pen);color:var(--pen)}
+/* v0.6.9: daily reports */
+.rl{margin:0 0 8px;padding-inline-start:20px;font-size:14px;line-height:1.6}
+.rchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.rsec.dn h3{border-inline-start:6px solid var(--bad)}
+.rsec.w h3{border-inline-start:6px solid var(--warn)}
+.wbsw{display:flex;flex-direction:column;gap:6px;justify-content:flex-end}

@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.8';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.9';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -23,12 +23,12 @@
     if (idb) { try { await new Promise((res, rej) => { const t = idb.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(JSON.parse(JSON.stringify(S)), 'state'); t.oncomplete = res; t.onerror = () => rej(t.error); }); return; } catch (e) { } }
     try { localStorage.setItem(DBN, JSON.stringify(S)); } catch (e) { toast('مساحة التخزين خلصت. صدّر الداتا.'); }
   }
-  const fresh = () => ({ v: 1, ui: { mode: 'type' }, plan: {}, errs: [], users: {}, me: null, ucode: {}, ureq: {}, uprof: {}, cfg: { prodDayStart: SEED.prodDayStart, dieselMin: SEED.dieselMin, gasDiffPct: SEED.gasDiffPct, edits: {}, newWells: {}, chemMin: {} }, days: {}, dt: [], samples: [], audit: [], jobs: {}, gone: {} });
+  const fresh = () => ({ v: 1, ui: { mode: 'type' }, plan: {}, errs: [], users: {}, me: null, ucode: {}, ureq: {}, uprof: {}, reps: {}, cfg: { prodDayStart: SEED.prodDayStart, dieselMin: SEED.dieselMin, gasDiffPct: SEED.gasDiffPct, edits: {}, newWells: {}, chemMin: {} }, days: {}, dt: [], samples: [], audit: [], jobs: {}, gone: {} });
   let S = fresh();
 
   // ---------------- config ----------------
   let WELLS = [], WBY = {}, TANKS = SEED.tanks;
-  const EDITK = ['t', 'hid', 'int', 'r', 'ch'];   // what the admin can change on a well
+  const EDITK = ['t', 'hid', 'int', 'r', 'ch', 'k', 'tg', 'm'];   // what the engineer / admin can change on a well
   function rebuildWells() {
     const pick = e => { const o = {}; if (e) for (const k of EDITK) if (k in e) o[k] = e[k]; return o; };
     const added = Object.values(S.cfg.newWells || {});
@@ -55,6 +55,7 @@
   const areaOf = id => SEED.areas.find(a => a.id === id);
   const canStaff = () => isAdmin() || !!(me() && (me().role === 'lead' || me().role === 'eng'));   // رئيس الورشة أو المهندس: توزيعة الأفراد
   const canPlan = () => isAdmin() || !!(me() && me().role === 'eng');     // المهندس: الصيانات والشغل والمهام
+  const canWells = canPlan;                                               // المهندس: بيانات الآبار والتقارير كمان
   const planFor = (day, aid) => (S.plan && S.plan[day + '|' + aid]) || { staff: [], maint: [], work: [], tasks: [] };
   function planObj(day, aid) { S.plan = S.plan || {}; return S.plan[day + '|' + aid] || (S.plan[day + '|' + aid] = { staff: [], maint: [], work: [], tasks: [] }); }
   const MAINT = { stop: 'صيانة مولد (البير هيقف)', sync: 'صيانة مولد Sync (البير مش هيقف)', other: 'صيانة تانية' };
@@ -684,7 +685,7 @@
     let h = top('المتابعة', dayLine()) + '<main class="wrap">';
     if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للأدمن بس.</div>`;
     h += staffCard(d) + planSections(ids, d, cp, true);
-    const open = WELLS.map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
+    const open = WELLS.filter(w => !w.hid).map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
     h += `<section class="sec"><h3>واقف دلوقتي <small>${open.length}</small></h3>`;
     h += open.length ? open.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} <span class="tag">${esc(areaOf(w.a).n)}</span></span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}</span><span class="wm"></span></button>`).join('') : '<p class="empty">كل الآبار شغالة</p>';
     markSeen(d, ids);
@@ -694,7 +695,7 @@
     const now = Date.now(), [s0, e0] = L.dayWindow(d, H()), cp = canPlan() && editable(), cs = canStaff() && editable();
     let h = `<section class="sec plan"><h3>المتابعة · الأفراد <small>${esc(a.n)}</small></h3><div class="pbody">${staffBlock(a.id, d, cs, false)}</div></section>`;
     h += planSections([a.id], d, cp, false);
-    const ws = WELLS.filter(w => w.a === a.id);
+    const ws = WELLS.filter(w => w.a === a.id && !w.hid);
     const open = ws.map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
     const today = S.dt.filter(e => WBY[e.w] && WBY[e.w].a === a.id && e.s < e0 && (e.e == null || e.e > s0)).sort((x, y) => y.s - x.s);
     h += `<section class="sec"><h3>واقف دلوقتي <small>${open.length}</small></h3>`;
@@ -964,7 +965,10 @@
     const pv = prev && prev.r.v[k]; const dv = prev ? L.deviations(w, { v: { [k]: v } }, prev.r)[k] : null;
     return `<label class="fld"><span class="lab"><bdi dir="ltr">${esc(F.l)}</bdi> ${F.u ? `<em dir="ltr">${esc(F.u)}</em>` : ''}${F.sub ? `<small class="lsub" dir="ltr">${esc(F.sub)}</small>` : ''}</span><input inputmode="decimal" data-f="${k}" value="${esc(v)}" ${ro} autocomplete="off"><span class="prev" data-pv="${k}">${pv != null && pv !== '' ? `آخر مرة ${esc(pv)}` : ''}${dv ? ` <span class="w">${dv > 0 ? '+' : ''}${dv}%</span>` : ''}</span></label>`;
   }
+  // a reading of an old day is shown with the target / factor it was written with
+  const w0 = w => w;
   function calcHtml(w) {
+    w = L.wAt(w, dayGet(viewDay()).r[w.id]);
     if (w.t === 'GL') {
       const q = L.gasValue(w, FM.v), g = L.gasDiff(w, q, S.cfg.gasDiffPct);
       if (w.k > 0) return `<div class="calc"><p class="mute">Gas = √(Diff × (DS + 14.7)) × ${w.k} ÷ 1,000,000</p><div class="qv ${g && g.bad ? 'w' : ''}">${q == null ? '—' : q.toFixed(3)} <small>MMSCFD</small></div><p class="mute">التارجت ${w.tg ?? '—'}${g ? ` · الفرق ${g.d > 0 ? '+' : ''}${g.d}%` : ''}</p></div>`;
@@ -1021,6 +1025,7 @@
     const sub = [T.n, w.sec !== T.n ? w.sec : '', w.p ? 'في الورقة: ' + w.p : ''].filter(Boolean).join(' · ');
     let h = `<header class="fhead"><div class="wrap"><button class="ib" data-act="fclose" aria-label="رجوع">${ic('back')}</button><div class="tt"><h2 class="fname">${esc(w.n)}</h2><p class="sub">${esc(sub)}</p></div><span class="fsv" id="fsv" aria-live="polite"></span></div></header><div class="fbody"><div class="wrap">`;
     h += statusHtml(w, ro);
+    if (canWells()) h += `<button class="linkbtn" data-act="wedit" data-w="${w.id}">✎ بيانات البير: النوع، التارجت، الفاكتور، يظهر ولا لأ، الكيميكال</button>`;
     if (w.hid) h += `<div class="banner">البير ده مخفي عن الفنيين. لو سجلت قراية، الأدمن هيعرف.</div>`;
     if (w.t === 'GL') h += `<div class="banner info">العداد: <b>${esc(w.m || (w.k > 0 ? 'Orifice' : '—'))}</b>${w.k > 0 ? ` · Factor ${w.k}` : ' · قراية مباشرة'}${w.tg ? ` · التارجت ${w.tg}` : ''}</div>`;
     if (w.disc) h += `<div class="banner">العداد Disconnected. القرايات مش إجبارية، اكتب اللي حصل في الكومنت.</div>`;
@@ -1048,7 +1053,7 @@
     if (!keys.length && (old.n || '') === n) return;
     for (const k of keys) sessAudit(FM, 'r|' + k, w.id, w.n, k, ov[k], v[k] ?? '', d, FM.why);
     if ((old.n || '') !== n) sessAudit(FM, 'r|n', w.id, w.n, 'كومنت', old.n, n, d, FM.why);
-    if (Object.keys(v).length || n) D.r[w.id] = Object.assign({ v, n }, stampBy()); else delete D.r[w.id];
+    if (Object.keys(v).length || n) { D.r[w.id] = Object.assign({ v, n }, stampBy()); if (w.t === 'GL' || w.t === 'WIW') { const o = old.v && 'wk' in old ? old : w0(w); D.r[w.id].wk = o === w ? w.k || 0 : o.wk; D.r[w.id].wt = o === w ? w.tg ?? null : o.wt; } } else delete D.r[w.id];
     mark(`r|${d}|${w.id}`);
     if (w.hid && !FM.hidAud) { FM.hidAud = 1; audit(w.id, w.n, 'قراية على بير مخفي', '', 'اتسجل', d, FM.why); }
     save(); savedTick();
@@ -1276,6 +1281,90 @@
     return 'ok';
   }
 
+  // ---------------- daily reports: close the wells the report says are stopped, update targets, compare ----------------
+  let RP = null; // the files being read: { files, day, plan, rec } or { busy } or { err }
+  const repIt = (w, x) => ({ i: w.id, n: w.n, x: x || '' });
+  function repRecord(P, files) {
+    const n = v => REP.num(v), u = me();
+    return { day: P.day, files: files.map(f => f.name), date: files.map(f => f.date).filter(Boolean).sort().pop() || '', by: S.me, byn: u ? u.name : '', t: Date.now(), stale: P.stale ? 1 : 0, hidStop: P.hidStop,
+      close: P.close.map(c => repIt(c.w, c.r.cause || '')), tg: P.tg.map(c => repIt(c.w, `${c.f === 'k' ? 'Factor' : 'التارجت'}: ${c.a || '—'} ← ${c.b || (c.f === 'k' ? 'قراية مباشرة' : '—')}`)),
+      running: P.running.map(c => repIt(c.w, `التقرير ${n(c.r.hrs)} ساعة · في البرنامج واقف من ${L.stamp(c.e.s)}`)),
+      hidRun: P.hidRun.map(c => repIt(c.w, `${c.r.st} · ${n(c.r.hrs)} ساعة`)),
+      hrs: P.hrs.map(c => repIt(c.w, `التقرير ${c.rep} ساعة · البرنامج ${c.app}${c.r.cause ? ' · ' + c.r.cause : ''}`)),
+      types: P.types.map(c => repIt(c.w, `التقرير ${c.r.st} · البرنامج ${TYPE_AR[c.w.t] || c.w.t}`)),
+      keep: P.keep.map(c => repIt(c.w, 'في البرنامج مسجل إنه اشتغل ' + L.stamp(c.e.e))),
+      miss: P.miss.map(r => ({ n: r.n, x: r.st || '' })), absent: P.absent.map(w => repIt(w)) };
+  }
+  function repPlanNow() {
+    RP.plan = REP.plan({ files: RP.files, wells: WELLS, alias: SEED.alias, dt: S.dt, day: RP.day, L, h: H(), now: Date.now(), today: curDay() });
+    RP.rec = repRecord(RP.plan, RP.files);
+  }
+  async function repRead(list) {
+    const fl = [...(list || [])]; if (!fl.length) return;
+    RP = { busy: true }; render();
+    try {
+      const files = [];
+      for (const f of fl) files.push(REP.extract(await XL.read(new Uint8Array(await f.arrayBuffer())), f.name));
+      const ok = files.filter(f => f.kind !== 'other'); if (!ok.length) throw new Error('مفيش فيها جدول آبار (WELL NAME) البرنامج يعرفه');
+      const d = ok.filter(f => f.kind === 'oil').concat(ok).map(f => f.date).filter(Boolean)[0];
+      RP = { files: ok, day: d ? L.addDays(d, -1) : L.addDays(curDay(), -1) }; repPlanNow();
+    } catch (e) { RP = { err: 'مقدرتش أقرا الملف: ' + (e && e.message || e) }; logErr('report: ' + (e && e.message || e)); }
+    render();
+  }
+  const REPS = rp => [['close', rp ? 'هيتقفلوا: واقفين في التقرير وشغالين في البرنامج' : 'اتقفلوا: كانوا واقفين في التقرير', 'dn'], ['tg', rp ? 'هيتحدّث التارجت والفاكتور' : 'اتحدّث التارجت والفاكتور', ''],
+    ['running', 'شغالين في التقرير وواقفين في البرنامج', 'w'], ['hidRun', 'شغالين في التقرير ومخفيين عن الفنيين', 'w'], ['hrs', 'ساعات التشغيل مختلفة', 'w'], ['types', 'النوع مختلف', 'w'],
+    ['keep', 'واقفين في التقرير ومتقفلوش', 'w'], ['miss', 'في التقرير ومش في البرنامج', ''], ['absent', 'ظاهرين للفنيين ومش في التقرير', '']];
+  function repHtml(rec, preview) {
+    let h = `<div class="card"><h3 style="margin:0 0 4px">تقرير يوم ${esc(arDay(rec.day))}</h3><p class="mute" style="margin:0">${rec.files.map(esc).join('، ')}${preview ? '' : ` · عمله ${esc(rec.byn || '')} ${esc(L.stamp(rec.t))}`}</p>`;
+    if (preview) h += `<label class="lab" style="margin-top:10px">يوم الإنتاج اللي التقرير بيتكلم عنه <em>(تقرير الصبح = اليوم اللي قبله من 6 لـ 6)</em></label><input class="in" type="date" id="rpday" value="${rec.day}" max="${curDay()}">`;
+    if (rec.stale) h += `<div class="banner">التقرير ده عن يوم فات عليه أكتر من يوم. الآبار اللي هتتقفل هتبقى واقفة من يومه، ولو فيه بير رجع اشتغل من وقتها، الفني يسجل إنه رجع.</div>`;
+    const cnt = k => (rec[k] || []).length, any = ['running', 'hidRun', 'hrs', 'types', 'keep'].some(k => cnt(k));
+    h += `<div class="rchips">${cnt('close') ? `<span class="chip dn"><b>${cnt('close')}</b> ${preview ? 'هيتقفلوا' : 'اتقفلوا'}</span>` : ''}${cnt('tg') ? `<span class="chip"><b>${cnt('tg')}</b> تارجت وفاكتور</span>` : ''}${any ? `<span class="chip w"><b>${['running', 'hidRun', 'hrs', 'types', 'keep'].reduce((n, k) => n + cnt(k), 0)}</b> فرق محتاج مراجعة</span>` : '<span class="chip">مفيش فرق في الحالة والساعات</span>'}</div>`;
+    if (rec.hidStop) h += `<p class="mute" style="margin:8px 0 0">و${rec.hidStop} بير مخفي عن الفنيين واقف في التقرير، دول متقفلوش في البرنامج.</p>`;
+    h += preview ? `<div class="btns" style="margin-top:12px"><button class="btn" data-act="repclear">إلغاء</button><button class="btn pen" data-act="repok">${cnt('close') || cnt('tg') ? 'اعتمد' : 'احفظ المقارنة'}</button></div>`
+      : `<button class="btn wa wide" style="margin-top:12px" data-act="repshare" data-d="${rec.day}">${ic('share')} ابعت المقارنة</button>`;
+    h += '</div>';
+    for (const [k, title, cls] of REPS(preview)) {
+      const a = rec[k] || []; if (!a.length) continue;
+      h += `<section class="sec rsec ${cls}"><h3>${esc(title)} <small>${a.length}</small></h3>${a.map(x => x.i ? `<button class="wrow" data-act="well" data-w="${esc(x.i)}"><span class="wn">${esc(x.n)}</span><span class="ws">${esc(x.x)}</span><span class="wm"></span></button>` : `<div class="irow"><span class="nm">${esc(x.n)}<small>${esc(x.x)}</small></span></div>`).join('')}</section>`;
+    }
+    return h;
+  }
+  function vRep() {
+    let h = top('تحديث من التقارير', 'المهندس والأدمن', 'settings') + '<main class="wrap">';
+    h += `<div class="card"><p style="margin:0 0 6px">اختار تقرير الإنتاج اليومي <bdi dir="ltr">AG OIL REPORT</bdi>، وشيت <bdi dir="ltr">Updated Gas Injection</bdi> لو عندك تحديث. البرنامج:</p>
+      <ul class="rl"><li>يقفّل الآبار الواقفة في التقرير، من أول يوم التقرير، ويفضل البير واقف لحد ما حد يسجل إنه رجع.</li><li>يحدّث تارجت وفاكتور الـ Gas Lift، وتارجت آبار الحقن.</li><li>يقارن التقرير بالبرنامج ويطلعلك كل فرق.</li></ul>
+      <p class="mute" style="margin:0 0 10px">إخفاء البير مش بيحصل لوحده. ده من "بيانات البير".</p>
+      <input type="file" id="rpf" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" multiple hidden>
+      <button class="btn pen wide" data-act="repfile" ${RP && RP.busy ? 'disabled' : ''}>${ic('dl')} ${RP && RP.busy ? 'بيقرا الملفات…' : 'اختار الملفات'}</button></div>`;
+    if (RP && RP.err) h += `<div class="banner">${esc(RP.err)}</div>`;
+    if (RP && RP.rec) return h + repHtml(RP.rec, true) + '</main>' + tabs('settings');
+    const days = Object.keys(S.reps || {}).sort().reverse(), d = V.rpd && S.reps[V.rpd] ? V.rpd : days[0];
+    if (d) {
+      if (days.length > 1) h += `<div class="stabs">${days.slice(0, 7).map(x => `<button class="stab ${x === d ? 'on' : ''}" data-act="go" data-v="rep" data-d="${x}">${esc(x.slice(5))}</button>`).join('')}</div>`;
+      h += repHtml(S.reps[d], false);
+    }
+    return h + '</main>' + tabs('settings');
+  }
+  function repApply() {
+    if (!RP || !RP.plan || !canWells()) return; repPlanNow();
+    const P = RP.plan, rec = RP.rec, [s0] = L.dayWindow(P.day, H()), lab = rec.date || P.day;
+    for (const { w, r } of P.close) { const e = Object.assign({ id: uid(), w: w.id, s: s0, e: null, r: r.cause || 'SI', o: 'تقرير الإنتاج ' + lab, src: 'rep' }, stampBy()); pushEv(e); audit(w.id, w.n, 'داون تايم', '', 'واقف في تقرير ' + lab, curDay()); }
+    for (const c of P.tg) setEdit(c.w.id, c.f, c.b || 0);
+    rec.t = Date.now(); S.reps = S.reps || {}; S.reps[P.day] = rec; mark('rp|' + P.day); S.ui.rpSeen = rec.t;
+    save(); RP = null; V.rpd = P.day; render(); window.scrollTo(0, 0); SYNC.run(false);
+    toast(rec.close.length || rec.tg.length ? `اتقفل ${rec.close.length} بير${rec.tg.length ? ` واتحدّث ${rec.tg.length} تارجت وفاكتور` : ''}` : 'اتحفظت المقارنة');
+  }
+  function repText(rec) {
+    const sec = (t, a) => a && a.length ? `\n\n*${t} (${a.length})*\n` + a.map(x => `- ${x.n}${x.x ? ' · ' + x.x : ''}`).join('\n') : '';
+    return `مقارنة تقرير الإنتاج مع AG Survey\nيوم ${rec.day}${rec.date ? ' · تقرير ' + rec.date : ''}` + REPS(false).map(([k, t]) => sec(t, rec[k])).join('') + (rec.hidStop ? `\n\nو${rec.hidStop} بير مخفي واقف في التقرير.` : '');
+  }
+  function repShare(day) {
+    const rec = S.reps && S.reps[day]; if (!rec) return; const text = repText(rec);
+    if (Cap && Cap.Share) return Cap.Share.share({ text, dialogTitle: 'ابعت المقارنة' }).catch(() => { });
+    if (navigator.share) return navigator.share({ text }).catch(() => { });
+    copyText(text);
+  }
   // ---------------- settings / admin ----------------
   function vSettings() {
     const u = me(), q = S.uprof[u.u];
@@ -1283,26 +1372,27 @@
     h += `<div class="card"><h3 style="margin:0 0 8px">${esc(u.name)}</h3><div class="kv"><b>اسم المستخدم</b><span dir="ltr">${esc(u.u)}</span><b>الرقم الوظيفي</b><span>${esc(u.emp || '—')}</span><b>الموبايل</b><span dir="ltr">${esc(u.phone || '—')}</span></div>
       ${q && q.st === 'wait' ? `<p class="banner info" style="margin:10px 0 0">طلب تعديل بياناتك مستني موافقة الأدمن.</p>` : q && q.st === 'no' ? `<p class="banner" style="margin:10px 0 0">الأدمن رفض طلب تعديل بياناتك اللي بعته. <button class="ib3 xs" data-act="profdis" aria-label="اقفل">×</button></p>` : ''}
       <div class="btns" style="margin-top:12px"><button class="btn" data-act="pinchg">غيّر الباسورد</button>${isAdmin() ? '' : '<button class="btn" data-act="profreq">عدّل بياناتي</button>'}<button class="btn" data-act="logout">خروج</button></div></div>`;
-    if (isAdmin()) { const n = nReqs(); h += `<div class="card"><h3 style="margin:0 0 8px">الأدمن</h3><div class="btns"><button class="btn pen" data-act="go" data-v="users">المستخدمين${n ? ` <b class="nbdg">${n}</b>` : ''}</button><button class="btn" data-act="go" data-v="admin">${ic('shield')} الآبار والإعدادات</button><button class="btn" data-act="go" data-v="audit">سجل التعديلات</button></div></div>`; }
+    if (isAdmin()) { const n = nReqs(); h += `<div class="card"><h3 style="margin:0 0 8px">الأدمن</h3><div class="btns"><button class="btn pen" data-act="go" data-v="users">المستخدمين${n ? ` <b class="nbdg">${n}</b>` : ''}</button><button class="btn" data-act="go" data-v="admin">${ic('shield')} الآبار والإعدادات</button><button class="btn" data-act="go" data-v="audit">سجل التعديلات</button></div><button class="btn wide" style="margin-top:8px" data-act="go" data-v="rep">${ic('dl')} تحديث من التقارير</button></div>`; }
+    else if (canWells()) h += `<div class="card"><h3 style="margin:0 0 8px">الآبار</h3><div class="btns"><button class="btn pen" data-act="go" data-v="rep">${ic('dl')} تحديث من التقارير</button><button class="btn" data-act="go" data-v="admin">بيانات الآبار</button></div></div>`;
     if ((S.errs || []).length) h += `<div class="card"><h3 style="margin:0 0 6px">سجل الأخطاء (${S.errs.length})</h3><p class="mute" style="margin-top:0">التطبيق قابل مشكلة. ابعتلي السجل ده، وبعد ما يتبعت بيتمسح.</p><button class="btn wide" data-act="errsend">ابعت سجل الأخطاء</button></div>`;
     h += `<div class="card"><h3 style="margin:0 0 6px">نسخة احتياطية</h3><p class="mute" style="margin-top:0">${SYNC.url() ? 'الداتا بتتبعت للشيت لوحدها. النسخة دي لو حبيت تحتفظ بملف على جنب.' : 'لحد ما الموبايل يتربط بالشيت، الداتا عليه بس. ابعت نسخة كل كام يوم.'}</p><button class="btn wide" data-act="backup">ابعت نسخة احتياطية</button></div>`;
     return h + '</main>' + tabs('settings');
   }
   function vAdmin() {
     const aid = V.a || SEED.areas[0].id, q = (V.q || '').trim().toUpperCase();
-    let h = top('الآبار والإعدادات', 'الأدمن بس', 'settings') + '<main class="wrap">';
-    h += `<div class="card"><h3 style="margin:0 0 8px">الإعدادات</h3><div class="two"><div><label class="lab">يوم الإنتاج بيبدأ الساعة</label><input class="in" id="ch" inputmode="numeric" value="${S.cfg.prodDayStart}"></div><div><label class="lab">تنبيه الديزل تحت %</label><input class="in" id="cd" inputmode="numeric" value="${S.cfg.dieselMin}"></div></div>
+    let h = top(isAdmin() ? 'الآبار والإعدادات' : 'بيانات الآبار', isAdmin() ? 'الأدمن بس' : 'المهندس', 'settings') + '<main class="wrap">';
+    if (isAdmin()) h += `<div class="card"><h3 style="margin:0 0 8px">الإعدادات</h3><div class="two"><div><label class="lab">يوم الإنتاج بيبدأ الساعة</label><input class="in" id="ch" inputmode="numeric" value="${S.cfg.prodDayStart}"></div><div><label class="lab">تنبيه الديزل تحت %</label><input class="in" id="cd" inputmode="numeric" value="${S.cfg.dieselMin}"></div></div>
       <div class="two" style="margin-top:10px"><div><label class="lab">تنبيه فرق الجاز عن التارجت %</label><input class="in" id="cg" inputmode="numeric" value="${S.cfg.gasDiffPct}"></div><div></div></div>
       <p class="lab" style="margin-top:12px">تنبيه الكيميكال تحت %</p><div class="cmins">${L.CHEMS.map(([c, n]) => `<label class="cmin"><bdi dir="ltr">${esc(n)}</bdi><input class="in" data-cmin="${c}" inputmode="numeric" value="${L.chemMin(S.cfg, c)}"></label>`).join('')}</div>
       <button class="btn pen wide" style="margin-top:12px" data-act="cfgsave">حفظ</button></div>`;
-    h += `<div class="card"><h3 style="margin:0 0 8px">الربط بالشيت</h3><label class="lab">رابط الشيت (Web app URL)</label><input class="in" id="surl" dir="ltr" value="${esc(SYNC.url())}" placeholder="https://script.google.com/macros/s/…/exec"><button class="btn pen wide" style="margin-top:8px" data-act="surlsave">حفظ وجرّب</button><p style="margin:10px 0 0" data-sync>${syncLine()}</p></div>`;
-    if (SYNC.url() && !(window.CONFIG && CONFIG.web)) h += `<div class="card"><h3 style="margin:0 0 6px">نسخة الآيفون والكمبيوتر</h3><p class="mute" style="margin:0 0 10px">ابعت اللينك ده للي عاوز يشتغل من آيفون أو كمبيوتر. بيفتح البرنامج مربوط بالشيت، وبيانات الآبار بتنزل بعد ما يفتحه. اللينك ده زي باسورد للشيت، متبعتوش غير لناس الشغل.</p>
+    if (isAdmin()) h += `<div class="card"><h3 style="margin:0 0 8px">الربط بالشيت</h3><label class="lab">رابط الشيت (Web app URL)</label><input class="in" id="surl" dir="ltr" value="${esc(SYNC.url())}" placeholder="https://script.google.com/macros/s/…/exec"><button class="btn pen wide" style="margin-top:8px" data-act="surlsave">حفظ وجرّب</button><p style="margin:10px 0 0" data-sync>${syncLine()}</p></div>`;
+    if (isAdmin() && SYNC.url() && !(window.CONFIG && CONFIG.web)) h += `<div class="card"><h3 style="margin:0 0 6px">نسخة الآيفون والكمبيوتر</h3><p class="mute" style="margin:0 0 10px">ابعت اللينك ده للي عاوز يشتغل من آيفون أو كمبيوتر. بيفتح البرنامج مربوط بالشيت، وبيانات الآبار بتنزل بعد ما يفتحه. اللينك ده زي باسورد للشيت، متبعتوش غير لناس الشغل.</p>
       <div class="btns"><button class="btn wa" data-act="weblinkshare">${ic('share')} ابعته</button><button class="btn" data-act="weblinkcopy">انسخ</button></div><p class="mute" style="margin:8px 0 0">${S.seedPub === SEED.version ? 'بيانات الآبار متحدثة على الشيت.' : 'بيانات الآبار هتتبعت للشيت مع أول إرسال.'}</p></div>`;
     h += `<div class="stabs">${SEED.areas.map(a => `<button class="stab ${a.id === aid ? 'on' : ''}" data-act="aarea" data-a="${a.id}">${esc(a.n)}</button>`).join('')}</div>
       <div class="search"><input id="aq" placeholder="دوّر على بير" value="${esc(V.q || '')}" dir="ltr"></div>
       <p class="mute" style="margin:10px 2px 0">"يظهر" يعني الفنيين يشوفوه في قايمة المنطقة. البير المخفي بيفضل بالداتا بتاعته وترجعه في أي وقت. تغيير النوع بيغيّر الخانات اللي الفني بيشوفها. ${SYNC.url() ? 'أي تغيير هنا بيوصل لكل الموبايلات أول ما يتبعت للشيت.' : 'التغيير هيوصل لكل الموبايلات لما الموبايل ده يتربط بالشيت.'}</p><div class="card">`;
     const ws = WELLS.filter(w => w.a === aid && (!q || w.n.toUpperCase().includes(q)));
-    h += `<h3 style="margin:4px 0 8px">الآبار <small class="mute">بترتيب الطريق</small></h3><button class="btn pen wide" style="margin-bottom:8px" data-act="nwell">+ بير جديد في ${esc(areaOf(aid).n)}</button>`;
+    h += `<h3 style="margin:4px 0 8px">الآبار <small class="mute">بترتيب الطريق</small></h3>${isAdmin() ? `<button class="btn pen wide" style="margin-bottom:8px" data-act="nwell">+ بير جديد في ${esc(areaOf(aid).n)}</button>` : ''}`;
     h += ws.map(w => `<div class="arow"><div class="nm">${esc(w.n)}<small>${w.add ? 'بير جديد' : w.geo ? 'اتنسب بالإحداثيات' : 'من ورقة السيرفاي'}${(w.ch || []).length ? ' · كيميكال ' + w.ch.length : ''}</small></div>
       <select class="in tsel" data-type="${w.id}">${L.TYPE_ORDER.map(t => `<option value="${t}" ${w.t === t ? 'selected' : ''}>${t === 'GL' ? 'Gas Lift' : t}</option>`).join('')}</select>
       <label class="swl">متقطع<span class="sw"><input type="checkbox" data-int="${w.id}" ${w.int ? 'checked' : ''}><i></i></span></label>
@@ -1311,11 +1401,12 @@
     return h + '</div></main>' + tabs('settings');
   }
   function setEdit(id, k, val) {
+    if (!canWells()) return;
     const e = S.cfg.edits[id] || (S.cfg.edits[id] = {}); const base = SEED.wells.find(w => w.id === id) || (S.cfg.newWells || {})[id] || {}; const old = WBY[id] ? WBY[id][k] : undefined;
     const same = k === 'ch' ? JSON.stringify(base.ch || []) === JSON.stringify(val || []) : (base[k] || 0) === (val || 0);
     if (same) delete e[k]; else e[k] = val; const u = me(); e.by = S.me; e.byn = u ? u.name : ''; e.at = Date.now(); // not stampBy(): its "t" is the type here
     if (!EDITK.some(x => x in e)) delete S.cfg.edits[id]; mark('cw|' + id);
-    const lab = { hid: 'يظهر للفنيين', int: 'تشغيل متقطع', t: 'النوع', r: 'مكانه في ترتيب الطريق', ch: 'الكيميكال' }[k];
+    const lab = { hid: 'يظهر للفنيين', int: 'تشغيل متقطع', t: 'النوع', r: 'مكانه في ترتيب الطريق', ch: 'الكيميكال', k: 'Factor', tg: 'التارجت', m: 'العداد' }[k];
     const fmt = v => k === 'hid' ? (v ? 'مخفي' : 'يظهر') : k === 'int' ? (v ? 'أيوه' : 'لأ') : k === 'ch' ? (v || []).map(c => L.CHEM_N[c] || c).join('، ') : v;
     if (k === 'r') audit(id, WBY[id] ? WBY[id].n : id, lab, '', 'اتنقل', curDay()); else audit(id, WBY[id] ? WBY[id].n : id, lab, fmt(old), fmt(val), curDay());
     rebuildWells(); save();
@@ -1329,21 +1420,44 @@
     return i + 1 < ws.length ? (rr(ws[i]) + rr(ws[i + 1])) / 2 : rr(ws[i]) + 10;
   }
   let MW = null, MNA = null;
+  // بيانات البير: the engineer / admin, from the wells page or from the well's own screen
   function wellBox(id) {
     const w = WBY[id]; if (!w) return; const ws = WELLS.filter(x => x.a === w.a), i = ws.findIndex(x => x.id === id);
     MW = id;
-    modal(`<h3>${esc(w.n)}</h3><p class="lab">الكيميكال اللي على البير</p>${L.CHEMS.map(([c, n]) => `<label class="ck"><input type="checkbox" data-wch="${c}" ${(w.ch || []).includes(c) ? 'checked' : ''}><bdi dir="ltr">${esc(n)}</bdi></label>`).join('')}
+    const sw = (k, on, l) => `<label class="swl">${l}<span class="sw"><input type="checkbox" id="${k}" ${on ? 'checked' : ''}><i></i></span></label>`;
+    modal(`<h3>${esc(w.n)} <small class="mute">بيانات البير</small></h3>
+      <div class="two"><div><label class="lab">النوع</label><select class="in" id="wbt">${L.TYPE_ORDER.map(t => `<option value="${t}" ${w.t === t ? 'selected' : ''}>${t === 'GL' ? 'Gas Lift' : t}</option>`).join('')}</select></div>
+      <div class="wbsw">${sw('wbv', !w.hid, 'يظهر للفنيين')}${sw('wbi', w.int, 'تشغيل متقطع')}</div></div>
+      <div id="wbx"></div>
+      <p class="lab" style="margin-top:12px">الكيميكال اللي على البير</p>${L.CHEMS.map(([c, n]) => `<label class="ck"><input type="checkbox" data-wch="${c}" ${(w.ch || []).includes(c) ? 'checked' : ''}><bdi dir="ltr">${esc(n)}</bdi></label>`).join('')}
       <label class="lab" style="margin-top:12px">مكانه في ترتيب الطريق: ييجي بعد</label>${wpHtml({ ws: ws.filter(x => x.id !== w.id), first: 'أول بير في الطريق', sel: [i > 0 ? ws[i - 1].id : '__first'] })}
-      ${w.add ? '<button class="btn danger wide" style="margin-top:12px" data-act="wdel">امسح البير ده</button>' : ''}
+      ${w.add && isAdmin() ? '<button class="btn danger wide" style="margin-top:12px" data-act="wdel">امسح البير ده</button>' : ''}
       <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="weditok">حفظ</button></div>`);
+    wbType(); $('#wbt').onchange = wbType;
+  }
+  function wbType() {
+    const w = WBY[MW], t = $('#wbt').value, x = $('#wbx'); if (!x || !w) return;
+    const v = k => w.t === t && w[k] != null ? w[k] : '';
+    x.innerHTML = t === 'GL' ? `<div class="two" style="margin-top:10px"><div><label class="lab">التارجت <em>MMSCFD</em></label><input class="in" id="wbg" inputmode="decimal" dir="ltr" value="${esc(v('tg'))}"></div><div><label class="lab">Factor <em>(فاضي = قراية مباشرة)</em></label><input class="in" id="wbk" inputmode="decimal" dir="ltr" value="${esc(w.t === t && w.k > 0 ? w.k : '')}"></div></div><label class="lab" style="margin-top:10px">العداد</label><input class="in" id="wbm" dir="ltr" value="${esc(v('m'))}" placeholder="Barton / Scanner">`
+      : t === 'WIW' ? `<label class="lab" style="margin-top:10px">التارجت <em>BWPD</em></label><input class="in" id="wbg" inputmode="decimal" dir="ltr" value="${esc(v('tg'))}">` : '';
   }
   function wellEditOk() {
     const w = WBY[MW]; if (!w) return closeModal();
+    const num = id => { const el = $('#' + id); if (!el) return undefined; const x = L.normNum(el.value).trim(); return x === '' ? 0 : L.toNum(x); };
+    const t = $('#wbt').value, tg = num('wbg'), k = num('wbk'), m = $('#wbm') ? $('#wbm').value.trim() : undefined;
+    if ((tg !== undefined && (tg == null || tg < 0)) || (k !== undefined && (k == null || k < 0))) return toast('اكتب أرقام صح');
     const ch = [...document.querySelectorAll('[data-wch]:checked')].map(x => x.dataset.wch);
     const ws = WELLS.filter(x => x.a === w.a), i = ws.findIndex(x => x.id === w.id), prevId = i > 0 ? ws[i - 1].id : '__first', sel = WP.sel[0] || prevId;
+    const hid = $('#wbv').checked ? 0 : 1, int = $('#wbi').checked ? 1 : 0;
+    if (t !== w.t) setEdit(w.id, 't', t);
+    if (hid !== (w.hid ? 1 : 0)) setEdit(w.id, 'hid', hid);
+    if (int !== (w.int ? 1 : 0)) setEdit(w.id, 'int', int);
+    if (tg !== undefined && tg !== (w.tg || 0)) setEdit(w.id, 'tg', tg || 0);
+    if (k !== undefined && k !== (w.k || 0)) setEdit(w.id, 'k', k || 0);
+    if (m !== undefined && m !== (w.m || '')) setEdit(w.id, 'm', m);
     if (JSON.stringify(ch) !== JSON.stringify(w.ch || [])) setEdit(w.id, 'ch', ch);
     if (sel !== prevId) setEdit(w.id, 'r', rAfter(w.a, sel, w.id));
-    closeModal(); render(); toast('اتحفظ');
+    closeModal(); if (FM && FM.w.id === w.id) { FM.w = WBY[w.id]; renderForm(); } else render(); toast('اتحفظ');
   }
   function wellDel() {
     const w = WBY[MW]; if (!w || !w.add) return;
@@ -1411,7 +1525,7 @@
     if (isPending(me())) { stopGeo(); WAITING = true; app.innerHTML = vWait(); return; }
     if (!(V.v === 'area' && (V.tab || 'wells') === 'wells' && S.ui.mode === 'map')) stopGeo();
     const v = V.v;
-    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? vFollow() : v === 'staff' ? vStaff() : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && isAdmin() ? vAdmin() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
+    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? vFollow() : v === 'staff' ? vStaff() : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && canWells() ? vAdmin() : v === 'rep' && canWells() ? vRep() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
   }
   let WAITING = false; // the waiting screen of a new account was shown
   function go(v, extra) { V = Object.assign({ v }, extra || {}); render(); window.scrollTo(0, 0); }
@@ -1420,7 +1534,7 @@
     const b = e.target.closest('[data-act]'); if (!b) { if (e.target === modalEl) closeModal(); return; }
     const a = b.dataset.act;
     switch (a) {
-      case 'go': return go(b.dataset.v);
+      case 'go': return go(b.dataset.v, b.dataset.d ? { rpd: b.dataset.d } : null);
       case 'area': S.ui.lastArea = b.dataset.a; save(); return go('area', { a: b.dataset.a, tab: 'wells' });
       case 'stab': V.tab = b.dataset.v; return render();
       case 'mode': S.ui.mode = b.dataset.v; save(); return render();
@@ -1437,11 +1551,16 @@
       case 'sclear': V.sw = null; V.spt = ''; return render();
       case 'pdf': return doPdf();
       case 'img': return doImages();
-      case 'nwell': return newWellBox(V.a || SEED.areas[0].id);
-      case 'nwellok': return newWellOk();
-      case 'wedit': return wellBox(b.dataset.w);
-      case 'weditok': return wellEditOk();
-      case 'wdel': return wellDel();
+      case 'nwell': return isAdmin() ? newWellBox(V.a || SEED.areas[0].id) : null;
+      case 'nwellok': return isAdmin() ? newWellOk() : null;
+      case 'wedit': return canWells() ? wellBox(b.dataset.w) : null;
+      case 'weditok': return canWells() ? wellEditOk() : null;
+      case 'wdel': return isAdmin() ? wellDel() : null;
+      case 'repfile': { const i = $('#rpf'); if (i) i.click(); return; }
+      case 'repok': return repApply();
+      case 'repclear': RP = null; return render();
+      case 'repshare': return repShare(b.dataset.d);
+      case 'repday': return;
       case 'syncnow': { document.querySelectorAll('[data-sync]').forEach(el => el.innerHTML = '<span class="sy run">بيبعت…</span>'); SYNC.run(true); return; }
       case 'surlsave': {
         const u = ($('#surl').value || '').trim();
@@ -1566,9 +1685,11 @@
         t.classList.remove('bad'); if (setTank(t.dataset.ftk, v, viewDay(), FM.why, FM)) { save(); savedTick(); if (x != null && x < S.cfg.dieselMin) toast(`الديزل تحت ${S.cfg.dieselMin}%`); } return; }
     }
     if (t.id === 'vday') { VDAY = t.value && t.value !== curDay() ? t.value : null; return render(); }
-    if (t.dataset.vis) return setEdit(t.dataset.vis, 'hid', t.checked ? 0 : 1);
-    if (t.dataset.int) return setEdit(t.dataset.int, 'int', t.checked ? 1 : 0);
-    if (t.dataset.type) { setEdit(t.dataset.type, 't', t.value); return toast('اتغير النوع'); }
+    if (t.dataset.vis) { if (!canWells()) return; return setEdit(t.dataset.vis, 'hid', t.checked ? 0 : 1); }
+    if (t.dataset.int) { if (!canWells()) return; return setEdit(t.dataset.int, 'int', t.checked ? 1 : 0); }
+    if (t.dataset.type) { if (!canWells()) return; setEdit(t.dataset.type, 't', t.value); return toast('اتغير النوع'); }
+    if (t.id === 'rpf') return repRead(t.files);
+    if (t.id === 'rpday') { if (RP) { RP.day = t.value || RP.day; repPlanNow(); render(); } return; }
     if (t.dataset.task) { const aid = t.dataset.a || V.a, pl = planObj(viewDay(), aid), x = pl.tasks.find(q => q.id === t.dataset.task); if (!x) return; x.done = t.checked ? stampBy() : null; mark(`pt|${viewDay()}|${aid}|${x.id}`); audit('plan', areaOf(aid).n, 'مهمة', t.checked ? '' : 'خلصت', t.checked ? 'خلصت: ' + x.x : x.x, viewDay()); save(); return render(); }
     if (t.id === 'jk') { const w = $('#jkw'); if (w) { w.hidden = t.value !== '__o'; if (!w.hidden) $('#jko').focus(); } return; }
     if (t.dataset.role) { const u = S.users[t.dataset.role]; if (!u || !isAdmin() || u.u === ADM() || !ROLES.some(r => r[0] === t.value)) return; audit('user', u.u, 'الوظيفة', roleName(u), (ROLES.find(r => r[0] === t.value) || ROLES[0])[1], curDay()); u.role = t.value; mark('u|' + u.u); save(); SYNC.run(false); return toast('اتغيرت الوظيفة'); }
@@ -1607,7 +1728,7 @@
   // Android back button
   if (Cap && Cap.App) Cap.App.addListener('backButton', () => { if (!modalEl.hidden) return closeModal(); if (FM) return closeForm();
     if (!me()) { if (V.auth) { V = { v: 'home', lu: V.lu }; return render(); } return Cap.App.exitApp(); }
-    if (V.v !== 'home' && !isPending(me())) return go(['admin', 'audit', 'users'].includes(V.v) ? 'settings' : V.v === 'staff' ? 'follow' : 'home'); Cap.App.exitApp(); });
+    if (V.v !== 'home' && !isPending(me())) return go(['admin', 'audit', 'users', 'rep'].includes(V.v) ? 'settings' : V.v === 'staff' ? 'follow' : 'home'); Cap.App.exitApp(); });
   // a new production day starts while the app is open
   setInterval(() => { if (!FM && modalEl.hidden && me() && !VDAY && document.activeElement === document.body) render(); }, 60000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) { flushForm(); bgStash(); saveNow(); } });
@@ -1643,7 +1764,7 @@
   function syncMeta(k, d) {
     if (d == null || typeof d !== 'object' || Array.isArray(d)) return d;
     const [p, a, b] = k.split('|'), o = Object.assign({}, d), an = id => (areaOf(id) || {}).n || id || '';
-    if (p === 'r') { const w = WBY[b]; if (w) { o._n = w.n; o._a = an(w.a); o._ty = w.t; if (w.t === 'GL' && w.k > 0) { const q = L.gasValue(w, d.v); if (q != null) o._q = Math.round(q * 1000) / 1000; } } }
+    if (p === 'r') { const w = WBY[b] && L.wAt(WBY[b], d); if (w) { o._n = w.n; o._a = an(w.a); o._ty = w.t; if (w.t === 'GL' && w.k > 0) { const q = L.gasValue(w, d.v); if (q != null) o._q = Math.round(q * 1000) / 1000; } } }
     if (p === 'c') { const w = WBY[b]; if (w) { o._n = w.n; o._a = an(w.a); o._ty = w.t; } }
     if (p === 'nw') { o._a = an(d.a); }
     if (p === 'd') { const t = TANKS.find(x => x.id === b); if (t) { o._place = t.place; o._code = t.code; o._cap = t.cap; o._a = an(t.a); } }
@@ -1663,6 +1784,7 @@
     if (WAITING && me() && !isPending(me())) { WAITING = false; V = { v: 'home' }; render(); toast('اتفعّل حسابك. أهلاً ' + firstName(me().name)); }
     else if (!me() && !app.querySelector('.auth')) { if (FM) { FM = null; formEl.hidden = true; formEl.innerHTML = ''; document.body.classList.remove('lock'); } closeModal(); V = { v: 'home' }; render(); }   // this account was removed on another phone
     else if (r.got && me() && quiet) render();
+    if (r.repChanged && canWells()) { const last = Object.values(S.reps || {}).sort((a, b) => b.t - a.t)[0]; if (last && last.t > (S.ui.rpSeen || 0)) { S.ui.rpSeen = last.t; save(); toast(`${last.byn || 'حد'} عمل مقارنة مع تقرير يوم ${last.day}: اتقفل ${last.close.length} بير`); } }
     if (isAdmin()) { const n = nReqs(); if (n > (S.ui.nreq || 0)) toast(n === 1 ? 'فيه طلب جديد في المستخدمين' : `فيه ${n} طلبات في المستخدمين`); if (n !== (S.ui.nreq || 0)) { S.ui.nreq = n; save(); } }
     document.querySelectorAll('[data-sync]').forEach(el => el.innerHTML = syncLine());
     if (r.got) checkAlerts();
@@ -1689,7 +1811,8 @@
     if (S.ui.errv !== VERSION) { S.errs = []; S.ui.errv = VERSION; } // a new version starts with an empty error log
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { }
     if (!S.ui.here) S.ui.here = Object.keys(S.users);
-    for (const m of ['ucode', 'ureq', 'uprof']) if (!S[m] || typeof S[m] !== 'object') S[m] = {};
+    for (const m of ['ucode', 'ureq', 'uprof', 'reps']) if (!S[m] || typeof S[m] !== 'object') S[m] = {};
+    for (const d in S.reps) if (d < L.addDays(curDay(), -60)) delete S.reps[d];
     delete S.admin; seedAdmin();
     SYNC.init({ getS: () => S, save, meta: syncMeta, onDone: syncDone, onGone, seedPart, onSeed, cutDay: () => L.addDays(curDay(), -60), version: VERSION, bgOn: () => !!BG(), before: bgTake });
     for (const h of GONE0) if (!(S.gone && S.gone[h])) { const x = Object.keys(S.users).find(u => L.uhash(u) === h); if (x) { scrubUser(x); save(); } else { S.gone = S.gone || {}; S.gone[h] = 1; } } // a phone that never had the person only remembers the hash

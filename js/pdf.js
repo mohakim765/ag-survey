@@ -90,7 +90,7 @@
       const list = ws.filter(w => w.t === t); if (!list.length) continue;
       const cols = COLS[t].map(([hh, k, w]) => ({ h: hh, k, w: w || 1 }));
       const rows = list.map(w => {
-        const r = D.r[w.id], v = r ? r.v : {};
+        const r = D.r[w.id], v = r ? r.v : {}; w = L.wAt(w, r);
         return cols.map(c => {
           if (c.k === 'n') return w.n; if (c.k === 'st') return status(w); if (c.k === 'dsl') return dsl(w); if (c.k === 'CSG') return csg(v.CSG);
           if (c.k === 'tg') return w.tg ?? ''; if (c.k === 'm') return w.m || (w.k ? 'Orifice' : '');

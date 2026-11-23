@@ -81,8 +81,10 @@
     for (const k of TYPES[w.t].f) { if (FIELDS[k].k) continue; const a = toNum(r.v[k]), b = toNum(prev.v[k]); if (a == null || b == null || b === 0) continue; const d = Math.round((a - b) / Math.abs(b) * 100); if (Math.abs(d) > 30) out[k] = d; }
     return out;
   }
+  // the target and factor a reading was written with (they can change later; old days keep theirs)
+  function wAt(w, r) { return r && 'wk' in r ? Object.assign({}, w, { k: r.wk || 0, tg: r.wt }) : w; }
   function checks(w, r, prev, cfg) {
-    const out = []; if (!r) return out;
+    const out = []; if (!r) return out; w = wAt(w, r);
     for (const [k, p] of Object.entries(deviations(w, r, prev))) out.push(`${FIELDS[k].s || FIELDS[k].l} ${p > 0 ? '+' : ''}${p}% عن آخر قراية`);
     if (w.t === 'GL') { const g = gasDiff(w, gasValue(w, r.v), cfg.gasDiffPct); if (g && g.bad) out.push(`الجاز ${g.d > 0 ? '+' : ''}${g.d}% عن التارجت`); }
     if (w.t === 'WIW' && w.tg > 0) { const inj = toNum(r.v.INJ); if (inj != null && inj < 0.8 * w.tg) out.push(`الحقن ${Math.round(inj / w.tg * 100)}% من التارجت`); }
@@ -109,12 +111,12 @@
         const D = S.days[day];
         for (const w of wells) {
           if (w.t !== t || !sel.has(w.a)) continue;
-          const r = D.r[w.id]; const up = uptime(S.dt, w.id, day, h, now); const ev = S.dt.some(e => e.w === w.id && e.s < dayWindow(day, h)[1] && (e.e == null || e.e > dayWindow(day, h)[0]));
+          const r = D.r[w.id], wq = wAt(w, r); const up = uptime(S.dt, w.id, day, h, now); const ev = S.dt.some(e => e.w === w.id && e.s < dayWindow(day, h)[1] && (e.e == null || e.e > dayWindow(day, h)[0]));
           if (!r && !ev) continue;
           const vals = fs.map(k => { const v = r && r.v[k]; if (v == null || v === '') return null; if (FIELDS[k].k === 'csg') return CSG[v] || v; const x = toNum(v); return x == null ? v : x; });
           let ex = [];
-          if (t === 'GL') { const q = r ? gasValue(w, r.v) : null; const g = gasDiff(w, q, S.cfg.gasDiffPct); ex = [w.m || (w.k ? 'Orifice' : ''), w.k || null, q == null ? null : Math.round(q * 1000) / 1000, w.tg || null, g ? { v: g.d, warn: g.bad } : null]; }
-          if (t === 'WIW') { const inj = r ? toNum(r.v.INJ) : null; ex = [w.tg || null, w.tg > 0 && inj != null ? Math.round(inj / w.tg * 1000) / 10 : null]; }
+          if (t === 'GL') { const q = r ? gasValue(wq, r.v) : null; const g = gasDiff(wq, q, S.cfg.gasDiffPct); ex = [wq.m || (wq.k ? 'Orifice' : ''), wq.k || null, q == null ? null : Math.round(q * 1000) / 1000, wq.tg || null, g ? { v: g.d, warn: g.bad } : null]; }
+          if (t === 'WIW') { const inj = r ? toNum(r.v.INJ) : null; ex = [wq.tg || null, wq.tg > 0 && inj != null ? Math.round(inj / wq.tg * 1000) / 10 : null]; }
           const [, de] = dayWindow(day, h), atEnd = Math.min(de, now), downNow = S.dt.some(e => e.w === w.id && e.s <= atEnd && (e.e == null || e.e > atEnd));
           rows.push([{ date: day }, AREA_N(seed, w.a), w.sec, w.n, downNow ? 'Down' : up.down > 0 ? 'Online (partial)' : 'Online', up.up, ...vals, ...ex, r && r.n || '', r && r.byn || '', r ? hhmm(r.t) : '']);
         }
@@ -184,6 +186,6 @@
     h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
     return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
   }
-  const api = { uhash, CHEMS, CHEM_N, CHEM_MIN, chemMin, FIELDS, TYPES, CSG, TYPE_ORDER, SIMPLE_REASONS, avocet, natural, dist, bearing, OTHER, INTERMITTENT, ymd, hhmm, stamp, addDays, prodDay, dayWindow, normNum, toNum, gasCalc, gasValue, gasDiff, openEvent, downMs, uptime, reasonsFor, isDone, summary, deviations, checks, exportSheets };
+  const api = { wAt, uhash, CHEMS, CHEM_N, CHEM_MIN, chemMin, FIELDS, TYPES, CSG, TYPE_ORDER, SIMPLE_REASONS, avocet, natural, dist, bearing, OTHER, INTERMITTENT, ymd, hhmm, stamp, addDays, prodDay, dayWindow, normNum, toNum, gasCalc, gasValue, gasDiff, openEvent, downMs, uptime, reasonsFor, isDone, summary, deviations, checks, exportSheets };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.L = api;
 })(typeof self !== 'undefined' ? self : this);

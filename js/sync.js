@@ -31,6 +31,7 @@
     if (p === 'sd') return C.seedPart ? C.seedPart(a, +b) : null;   // the wells' data, in parts, for the web version
     if (p === 'pj') { const L = s.jobs && s.jobs[a]; if (!L) return null; const i = findFromEnd(L, b); return i < 0 ? null : clone(L[i]); }
     if (p === 'a') { const i = findFromEnd(s.audit, a); return i < 0 ? null : clone(s.audit[i]); }
+    if (p === 'rp') return s.reps && s.reps[a] ? clone(s.reps[a]) : null;   // a comparison with the daily report
     return null;
   }
   // a record written by a person who was removed (their old phone): keep the values, drop the name
@@ -57,6 +58,7 @@
     if (p === 'ux') { if (d && d.del) { s.gone = s.gone || {}; s.gone[a] = 1; if (C.onGone) C.onGone(a); } return; }
     if (p === 'pj') { s.jobs = s.jobs || {}; return upsert(s.jobs[a] || (s.jobs[a] = []), b); }
     if (p === 'a') return upsert(s.audit, a);
+    if (p === 'rp') { s.reps = s.reps || {}; if (d) s.reps[a] = d; else delete s.reps[a]; }
   }
 
   // force: keep the time for an audit record too (a rewritten audit must not be undone by an older copy)
@@ -80,6 +82,7 @@
     for (const u in s.users) if (!s.users[u]._seed) put('u|' + u, s.users[u].at);   // the admin account from the seed is on every phone already
     for (const p in UMAP) for (const u in s[UMAP[p]] || {}) put(p + '|' + u, s[UMAP[p]][u].t);
     for (const h in s.gone || {}) put('ux|' + h);
+    for (const d in s.reps || {}) put('rp|' + d, s.reps[d].t);
     for (const x of s.audit) { if (!x.id) x.id = 'a' + x.ts.toString(36) + Math.random().toString(36).slice(2, 6); put('a|' + x.id, x.ts); }
   }
   // first link (or the sheet was emptied): send everything on this phone
@@ -121,7 +124,7 @@
     // the app is in the background on Android: the phone's own background job sends the changes (when there is a network)
     if (!manual && typeof document !== 'undefined' && document.hidden && C.bgOn && C.bgOn()) return { ok: false, err: '' };
     running = true; lastRun = Date.now(); clearTimeout(timer);
-    let got = 0, sent = 0, cfgChanged = false, usersChanged = false;
+    let got = 0, sent = 0, cfgChanged = false, usersChanged = false, repChanged = false;
     try {
       if (C.before) await C.before();   // what the background job already sent is not sent again
       if (!y.seeded) seedAll();
@@ -142,6 +145,7 @@
             if (pend && pend <= c.t) delete y.dirty[c.k];
             if (c.k.startsWith('cw|') || c.k.startsWith('nw|') || c.k === 'cs') cfgChanged = true;
             if (/^u[xcrq]?\|/.test(c.k)) usersChanged = true;
+            if (c.k.startsWith('rp|')) repChanged = true;
           }
         }
         y.cursor = res.cursor;
@@ -151,7 +155,7 @@
       return { ok: true, got, sent };
     } catch (e) { y.err = e.message || String(e); y.net = !!e.net; return { ok: false, err: y.err }; }
     finally {
-      running = false; const m = manual || manualAsk; manualAsk = false; C.save(); C.onDone({ got, sent, cfgChanged, usersChanged, manual: m });
+      running = false; const m = manual || manualAsk; manualAsk = false; C.save(); C.onDone({ got, sent, cfgChanged, usersChanged, repChanged, manual: m });
       // still something to send: try again soon (no network: every 20 seconds, so it goes as soon as the network is back)
       if (Object.keys(y.dirty).length) schedule(!y.err ? 3000 : y.net ? 20000 : 60000);
     }
@@ -159,7 +163,7 @@
   // forget modification times of old days (only recent days can still be edited)
   function prune() {
     const y = st(), cut = C.cutDay(); if (!cut) return;
-    for (const k in y.mt) { const p = k.split('|'); if ((DAY_KEYS[p[0]] || p[0] === 'ps' || p[0] === 'pj' || PLAN[p[0]]) && p[1] < cut && !y.dirty[k]) delete y.mt[k]; }
+    for (const k in y.mt) { const p = k.split('|'); if ((DAY_KEYS[p[0]] || p[0] === 'ps' || p[0] === 'pj' || p[0] === 'rp' || PLAN[p[0]]) && p[1] < cut && !y.dirty[k]) delete y.mt[k]; }
   }
   function status() { const y = st() || {}; return { linked: !!url(), pending: Object.keys(y.dirty || {}).length, last: y.last || 0, err: y.err || '', net: !!y.net, running }; }
 
