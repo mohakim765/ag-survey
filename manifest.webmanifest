@@ -1,6 +1,6 @@
 {
- "name": "AG Survey",
- "short_name": "AG Survey",
+ "name": "Hudhud",
+ "short_name": "Hudhud",
  "start_url": "./",
  "scope": "./",
  "display": "standalone",

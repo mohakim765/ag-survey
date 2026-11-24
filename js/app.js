@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.19';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.20';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -70,6 +70,7 @@
   const jobObj = (d, id) => jobsFor(d).find(j => j.id === id);
   const AREA_ORDER = ['east', 'sag', 'hawk', 'wd33']; // two boxes a row: آبار الزيت and ساج, then أبورواش and 33
   const areasOrdered = () => AREA_ORDER.map(areaOf).filter(Boolean).concat(SEED.areas.filter(a => !AREA_ORDER.includes(a.id)));
+  const seesFollow = () => canStaff();   // the technician works from the areas: no المتابعة tab
   const myAreas = d => SEED.areas.filter(a => planFor(d, a.id).staff.some(s => isMe(staffP(s)))).map(a => a.id);
   const alertAreas = d => { const m = myAreas(d); return m.length ? m : S.ui.lastArea ? [S.ui.lastArea] : []; };
   const PLK = [['maint', 'صيانة'], ['work', 'شغل على بير'], ['tasks', 'مهمة']];
@@ -115,6 +116,8 @@
     back: '<path d="M9 5l7 7-7 7"/>', close: '<path d="M6 6l12 12M18 6L6 18"/>', check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     home: '<path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/>', list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>', flask: '<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M7.5 15h9"/>',
     dl: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.6a3.5 3.5 0 0 1 0 6.8M18.5 14.5a6.5 6.5 0 0 1 3 5.5"/>',
+    hist: '<path d="M3.5 12a8.5 8.5 0 1 0 2.5-6L3.5 8.5"/><path d="M3.5 3.5v5h5"/><path d="M12 7.5V12l3 2"/>',
     well: '<path d="M12 3v18M8 21h8M9 7h6M10 11h4M7 3h10"/>', share: '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>', shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
   };
   const ic = k => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[k]}</svg>`;
@@ -153,7 +156,7 @@
 
   // ---------------- shell ----------------
   const tabs = cur => { const nb = me() ? unseen(curDay(), alertAreas(curDay())).length : 0, na = nReqs();
-    return `<nav class="tabs">${[['home', 'home', 'المناطق'], ['follow', 'list', 'المتابعة'], ['export', 'dl', 'إرسال الداتا'], ['settings', 'gear', 'الإعدادات']].map(([v, i, l]) => `<button class="${cur === v ? 'on' : ''}" data-act="go" data-v="${v}">${ic(i)}${l}${v === 'follow' && nb ? `<b class="nbdg">${nb}</b>` : v === 'settings' && na ? `<b class="nbdg">${na}</b>` : ''}</button>`).join('')}</nav>`; };
+    return `<nav class="tabs">${[['home', 'home', 'المناطق'], ['follow', 'list', 'المتابعة'], ['export', 'dl', 'إرسال الداتا'], ['settings', 'gear', 'الإعدادات']].filter(([v]) => v !== 'follow' || seesFollow()).map(([v, i, l]) => `<button class="${cur === v ? 'on' : ''}" data-act="go" data-v="${v}">${ic(i)}${l}${v === 'follow' && nb ? `<b class="nbdg">${nb}</b>` : v === 'settings' && na ? `<b class="nbdg">${na}</b>` : ''}</button>`).join('')}</nav>`; };
   const top = (title, sub, back) => `<header class="top"><div class="wrap">${back ? `<button class="ib" data-act="go" data-v="${back}" aria-label="رجوع">${ic('back')}</button>` : ''}<div class="tt"><h1>${title}</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div>${isAdmin() ? `<span class="tag" style="color:#f2f3f5;border-color:#f2f3f5">أدمن</span>` : ''}</div></header>`;
   const dayLine = () => { const d = viewDay(), past = d !== curDay(); return `${past ? 'يوم قديم: ' : 'يوم الإنتاج: '}${arDay(d)} · من ${H()} الصبح${me() ? ' · ' + esc(me().name) : ''}`; };
 
@@ -398,11 +401,13 @@
     let h = top('AG Survey', dayLine()) + '<main class="wrap">';
     if (window.CONFIG && CONFIG.web && !S.ui.noInstall && !(window.matchMedia && matchMedia('(display-mode: standalone)').matches) && !navigator.standalone) {
       const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
-      h += `<div class="banner info inst"><span>${ios ? 'عشان تثبّته على الآيفون: من Safari دوس زرار المشاركة <b>⬆</b> وبعدين <b>Add to Home Screen</b>.' : window.__installEvt ? 'تقدر تثبّت البرنامج على الكمبيوتر وتفتحه من أيقونة.' : 'تقدر تثبّته من قايمة Chrome أو Edge: <b>Install AG Survey</b>.'}</span>${!ios && window.__installEvt ? '<button class="btn sm pen" data-act="install">ثبّت</button>' : ''}<button class="ib3 xs" data-act="noinst" aria-label="اقفل">×</button></div>`;
+      h += `<div class="banner info inst"><span>${ios ? 'عشان تثبّته على الآيفون: من Safari دوس زرار المشاركة <b>⬆</b> وبعدين <b>Add to Home Screen</b>.' : window.__installEvt ? 'تقدر تثبّت البرنامج على الكمبيوتر وتفتحه من أيقونة.' : 'تقدر تثبّته من قايمة Chrome أو Edge: <b>Install Hudhud</b>.'}</span>${!ios && window.__installEvt ? '<button class="btn sm pen" data-act="install">ثبّت</button>' : ''}<button class="ib3 xs" data-act="noinst" aria-label="اقفل">×</button></div>`;
     }
     if (isAdmin()) { const n = nReqs(); if (n) h += `<button class="banner info wide" data-act="go" data-v="users">فيه ${n === 1 ? 'طلب' : n + ' طلبات'} من المستخدمين مستني${n === 1 ? '' : 'ة'} ردك ←</button>`;
       h += `<div class="card"><label class="lab">اليوم اللي بتشوفه <em>(الأدمن بس يقدر يفتح أيام قديمة)</em></label><input class="in" type="date" id="vday" value="${d}" max="${curDay()}"></div>`; }
     else if (d !== curDay()) VDAY = null;
+    if (me() && !seesFollow()) { const mine = SEED.areas.filter(a => planFor(d, a.id).staff.some(x => isMe(staffP(x)))).map(a => a.n).concat(jobsFor(d).filter(j => j.staff.some(x => isMe(staffP(x)))).map(j => j.k));
+      if (mine.length) h += `<p class="mine">النهارده انت في: <b>${mine.map(esc).join(' و')}</b></p>`; }
     h += `<p class="homesync" data-sync>${syncLine()}</p><div class="agrid">`;
     for (const a of SEED.areas) {
       const s = areaStats(a.id, d), pct = s.total ? Math.round(s.done / s.total * 100) : 0, pl = planFor(d, a.id), todo = pl.tasks.filter(t => !t.done).length + pl.maint.length + pl.work.length;
@@ -466,7 +471,10 @@
       const dn = list.filter(w => wellState(w, d).done).length;
       h += `<section class="sec"><h3>بترتيب الطريق من محطة AG <small>${dn}/${list.length}</small></h3>${list.map(w => wellRow(w, d, { chip: 1 })).join('')}</section>`;
     } else {
+      const have = L.TYPE_ORDER.filter(t => WELLS.some(w => w.a === a.id && !w.hid && w.t === t)), tf = !V.q && have.includes(V.tf) ? V.tf : null;
+      if (have.length > 1) h += `<div class="tfbar">${[[null, 'الكل']].concat(have.map(t => [t, t])).map(([t, l]) => `<button class="tfb${t === tf ? ' on' : ''}${t ? ' t-' + t : ''}" data-act="tf" data-v="${t || ''}">${l}</button>`).join('')}</div>`;
       for (const t of L.TYPE_ORDER) {
+        if (tf && t !== tf) continue;
         const ws = list.filter(w => w.t === t).sort((x, y) => L.natural(x.n, y.n)); if (!ws.length) continue;
         const dn = ws.filter(w => wellState(w, d).done).length;
         h += `<section class="sec ts-${t}"><h3><span class="th">${tchip(t)}${TYPE_AR[t] !== t ? ' ' + esc(TYPE_AR[t]) : ''}</span> <small>${dn}/${ws.length}</small></h3>${ws.map(w => wellRow(w, d)).join('')}</section>`;
@@ -500,7 +508,7 @@
   }
   function geoMsg(e) {
     const m = String(e && (e.message || e) || ''), c = e && e.code;
-    if (c === 1 || /denied|permission/i.test(m)) return { k: 'perm', t: 'التطبيق مش واخد إذن الموقع', how: 'من إعدادات الموبايل: التطبيقات ← AG Survey ← الأذونات ← الموقع ← "السماح أثناء استخدام التطبيق"، وشغّل "استخدام الموقع الدقيق".' };
+    if (c === 1 || /denied|permission/i.test(m)) return { k: 'perm', t: 'التطبيق مش واخد إذن الموقع', how: 'من إعدادات الموبايل: التطبيقات ← Hudhud ← الأذونات ← الموقع ← "السماح أثناء استخدام التطبيق"، وشغّل "استخدام الموقع الدقيق".' };
     if (c === 2 || /disabled|not enabled|unavailable|location services|provider/i.test(m)) return { k: 'off', t: 'الموقع مقفول في الموبايل', how: 'افتح "الموقع" (Location) من الشريط اللي فوق في الموبايل، وجرّب تاني.' };
     if (c === 3 || /timeout|timed out|اتأخر/i.test(m)) return { k: 'slow', t: 'الموبايل مجابش مكانه في الوقت', how: 'لو انت جوه مبنى اطلع برة أو جنب شباك، واستنى دقيقة وجرّب تاني.' };
     return { k: 'other', t: 'مشكلة في الموقع', how: m.slice(0, 140) };
@@ -1569,7 +1577,7 @@
     h += `<div class="card"><h3 style="margin:0 0 8px">${esc(u.name)}</h3><div class="kv"><b>اسم المستخدم</b><span dir="ltr">${esc(u.u)}</span><b>الرقم الوظيفي</b><span>${esc(u.emp || '—')}</span><b>الموبايل</b><span dir="ltr">${esc(u.phone || '—')}</span></div>
       ${q && q.st === 'wait' ? `<p class="banner info" style="margin:10px 0 0">طلب تعديل بياناتك مستني موافقة الأدمن.</p>` : q && q.st === 'no' ? `<p class="banner" style="margin:10px 0 0">الأدمن رفض طلب تعديل بياناتك اللي بعته. <button class="ib3 xs" data-act="profdis" aria-label="اقفل">×</button></p>` : ''}
       <div class="btns" style="margin-top:12px"><button class="btn" data-act="pinchg">غيّر الباسورد</button>${isAdmin() ? '' : '<button class="btn" data-act="profreq">عدّل بياناتي</button>'}<button class="btn" data-act="logout">خروج</button></div></div>`;
-    if (isAdmin()) { const n = nReqs(); h += `<div class="card"><h3 style="margin:0 0 8px">الأدمن</h3><div class="btns"><button class="btn pen" data-act="go" data-v="users">المستخدمين${n ? ` <b class="nbdg">${n}</b>` : ''}</button><button class="btn" data-act="go" data-v="admin">${ic('shield')} الآبار والإعدادات</button><button class="btn" data-act="go" data-v="audit">سجل التعديلات</button></div><button class="btn wide" style="margin-top:8px" data-act="go" data-v="rep">${ic('dl')} تحديث من التقارير</button></div>`; }
+    if (isAdmin()) { const n = nReqs(); h += `<div class="card"><h3 style="margin:0 0 8px">الأدمن</h3><div class="adm3"><button class="btn admb" data-act="go" data-v="users">${ic('users')}<span>المستخدمين</span>${n ? `<b class="nbdg">${n}</b>` : ''}</button><button class="btn admb" data-act="go" data-v="admin">${ic('gear')}<span>الآبار والإعدادات</span></button><button class="btn admb" data-act="go" data-v="audit">${ic('hist')}<span>سجل التعديلات</span></button></div><button class="btn wide" style="margin-top:8px" data-act="go" data-v="rep">${ic('dl')} تحديث من التقارير</button></div>`; }
     else if (canWells()) h += `<div class="card"><h3 style="margin:0 0 8px">الآبار</h3><div class="btns"><button class="btn pen" data-act="go" data-v="rep">${ic('dl')} تحديث من التقارير</button><button class="btn" data-act="go" data-v="admin">بيانات الآبار</button></div></div>`;
     if ((S.errs || []).length) h += `<div class="card"><h3 style="margin:0 0 6px">سجل الأخطاء (${S.errs.length})</h3><p class="mute" style="margin-top:0">التطبيق قابل مشكلة. ابعتلي السجل ده، وبعد ما يتبعت بيتمسح.</p><button class="btn wide" data-act="errsend">ابعت سجل الأخطاء</button></div>`;
     h += `<div class="card"><h3 style="margin:0 0 6px">نسخة احتياطية</h3><p class="mute" style="margin-top:0">${SYNC.url() ? 'الداتا بتتبعت للشيت لوحدها. النسخة دي لو حبيت تحتفظ بملف على جنب.' : 'لحد ما الموبايل يتربط بالشيت، الداتا عليه بس. ابعت نسخة كل كام يوم.'}</p><button class="btn wide" data-act="backup">ابعت نسخة احتياطية</button></div>`;
@@ -1739,7 +1747,7 @@
     if (isPending(me())) { stopGeo(); WAITING = true; app.innerHTML = vWait(); return; }
     if (!(V.v === 'area' && (V.tab || 'wells') === 'wells' && S.ui.mode === 'map')) stopGeo();
     const v = V.v;
-    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? vFollow() : v === 'staff' ? vStaff() : v === 'downs' ? vDowns() : v === 'rig' ? (canPlan() ? vRig() : vFollow()) : v === 'rigi' ? (canPlan() ? vRigI() : vFollow()) : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && canWells() ? vAdmin() : v === 'rep' && canWells() ? vRep() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
+    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? (seesFollow() ? vFollow() : vHome()) : v === 'staff' ? vStaff() : v === 'downs' ? vDowns() : v === 'rig' ? (canPlan() ? vRig() : vFollow()) : v === 'rigi' ? (canPlan() ? vRigI() : vFollow()) : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && canWells() ? vAdmin() : v === 'rep' && canWells() ? vRep() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
   }
   let WAITING = false; // the waiting screen of a new account was shown
   function go(v, extra) { V = Object.assign({ v }, extra || {}); render(); window.scrollTo(0, 0); }
@@ -1754,6 +1762,7 @@
       case 'rigi': return go('rigi', { rk: b.dataset.k, ri: +b.dataset.i || 0 });
       case 'stab': V.tab = b.dataset.v; return render();
       case 'mode': S.ui.mode = b.dataset.v; save(); return render();
+      case 'tf': { V.tf = b.dataset.v || null; const box = $('#wlist'), a = V.v === 'area' && areaOf(V.a); if (box && a) box.innerHTML = areaWellsList(a, viewDay()); return; }
       case 'mmeas': if (MAPV) { MAPV.meas = !MAPV.meas; b.classList.toggle('on', MAPV.meas);
           if (MAPV.meas) { toast('اضغط على أي بير تعرف المسافة من مكانك ليه'); if (!POS || !POS.ll || POS.err || Date.now() - POS.t > 60000) locate(false); else if (MAPV.sel && WBY[MAPV.sel]) fitMeToWell(WBY[MAPV.sel]); }
           drawMapOnly(); } return;
@@ -1906,7 +1915,7 @@
     if (t.id === 'sq') { V.sq = t.value; V.spt = ''; const r = $('#sres'); if (r) r.innerHTML = sampleResults(V.v === 'area' ? V.a : null); return; }
     if (t.id === 'fn' && FM) { FM.n = t.value; return; }
     if (t.dataset.pt || t.dataset.tk) { const n = L.normNum(t.value); setV(n); if (t.dataset.tk) { const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x <= 100 && x < S.cfg.dieselMin); } return; }
-    if (t.id === 'q') { V.q = t.value; const box = $('#wlist'), a = V.v === 'area' && areaOf(V.a); if (box && a) box.innerHTML = areaWellsList(a, viewDay()); return; }
+    if (t.id === 'q') { V.q = t.value; if (V.q) V.tf = null; const box = $('#wlist'), a = V.v === 'area' && areaOf(V.a); if (box && a) box.innerHTML = areaWellsList(a, viewDay()); return; }
     if ((t.id === 'aq' || t.id === 'uq') && comp) { V.q = t.value; return; }   // redrawn when the keyboard is done with the word
     if (t.id === 'aq' || t.id === 'uq') { V.q = t.value; const pos = t.selectionStart, id = t.id; render(); const q = $('#' + id); if (q) { q.focus(); q.setSelectionRange(pos, pos); } return; }
     if (t.id === 'lu') { V.lu = t.value; return; }
