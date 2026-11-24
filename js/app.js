@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.14';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.15';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -132,8 +132,16 @@
     const ck = L.checks(w, r, prev && prev.r, S.cfg);
     for (const t of tanksOf(w.id)) { const x = dayGet(day).d[t.id]; const v = x && L.toNum(x.v); if (v != null && v < S.cfg.dieselMin) ck.push(`ديزل ${t.code || t.place} ${v}%`); }
     const cv = chemOf(day, w.id); for (const c of w.ch || []) { const v = L.toNum(cv[c]); if (v != null && v < L.chemMin(S.cfg, c)) ck.push(`${L.CHEM_N[c] || c} ${v}%`); }
-    return { r, open, done: L.isDone(r) || !!open, ck };
+    const after = open ? 0 : restartAt(w.id, day), p = L.progress(w, r, S.cfg, after);
+    return { r, open, done: !!open || p.done, p, after, ck };
   }
+  // the time the well ran again on that day (a stop of that day ended), when it is running now
+  function restartAt(wid, day) {
+    if (L.openEvent(S.dt, wid)) return 0; const [s0, e0] = L.dayWindow(day, H()), now = Math.min(Date.now(), e0); let t = 0;
+    for (const e of S.dt) if (e.w === wid && e.e != null && e.e > s0 && e.e <= now && e.e > t) t = e.e;
+    return t;
+  }
+  const fname = k => (L.FIELDS[k] && (L.FIELDS[k].s || L.FIELDS[k].l)) || k;
   function areaStats(aid, day) {
     let done = 0, total = 0, down = 0, warn = 0;
     for (const w of visibleWells(aid)) { total++; const s = wellState(w, day); if (s.done) done++; if (s.open) down++; if (s.ck.length) warn++; }
@@ -328,7 +336,7 @@
   }
   const nReqs = () => isAdmin() ? pendingReqs().length : 0;
   function vUsers() {
-    const reqs = pendingReqs(), q = (V.q || '').trim().toLowerCase(), qd = digits(q), ua = u => esc(u.u);
+    const reqs = pendingReqs(), q = latinDigits(V.q || '').trim().toLowerCase(), qd = digits(q), ua = u => esc(u.u);
     let h = top('المستخدمين', `${Object.keys(S.users).length} حساب`, 'settings') + '<main class="wrap">';
     if (reqs.length) {
       h += `<section class="sec"><h3>طلبات مستنية <small>${reqs.length}</small></h3>`;
@@ -432,20 +440,28 @@
     opt = opt || {}; const s = wellState(w, d); const sum = s.r ? L.summary(w, s.r) : '';
     const pl = planFor(d, w.a), job = pl.maint.some(m => m.w.includes(w.id)) || pl.work.some(x => x.w === w.id);
     const tags = [opt.chip ? tchip(w.t) : '', s.open ? `<span class="tag dn">واقف</span>` : '', w.int ? `<span class="tag int">متقطع</span>` : '', w.hid ? `<span class="tag hid">مخفي</span>` : '', job ? `<span class="tag job">شغل النهارده</span>` : '', opt.dist != null ? `<span class="tag">${opt.dist}</span>` : ''].join('');
+    const part = !s.open && !s.done && s.p.have > 0;
     let sub = s.open ? `${esc(s.open.r)} · من ${sinceTxt(s.open.s)}` : sum ? esc(sum) : 'مستني قراية';
+    if (part) sub += ` · ناقص ${s.p.miss.map(fname).join('، ')}`;
+    else if (!s.open && !s.done && s.after) sub += ` · محتاج قراية بعد ما رجع ${hmA(s.after)}`;
     if (!s.open) { const [s0, e0] = L.dayWindow(d, H()), dm = L.downMs(S.dt, w.id, s0, Math.min(e0, Date.now())); if (dm > 0) sub += ` · وقف ${durTxt(dm)} النهارده`; }
     return `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} ${tags}</span>
       <span class="ws ${s.open || sum ? '' : 'dim'}">${sub}</span>${s.ck.length ? `<span class="wa">${esc(s.ck.join(' · '))}</span>` : ''}
-      <span class="wm">${s.ck.length ? '<i class="mk wn">!</i>' : s.done ? `<i class="mk ok">${ic('check')}</i>` : '<i class="mk"></i>'}</span></button>`;
+      <span class="wm">${part ? `<i class="mk pt" aria-label="ناقص">${s.p.have}/${s.p.need}</i>` : s.ck.length ? '<i class="mk wn">!</i>' : s.done ? `<i class="mk ok">${ic('check')}</i>` : '<i class="mk"></i>'}</span></button>`;
   }
   const MODES = [['type', 'حسب النوع'], ['route', 'ترتيب الطريق'], ['map', 'الخريطة']];
-  function wellMatch(q) { q = (q || '').trim().toUpperCase().replace(/[\s-]/g, ''); return w => !q || w.n.toUpperCase().replace(/[\s-]/g, '').includes(q) || (w.p || '').toUpperCase().replace(/[\s-]/g, '').includes(q); }
+  function wellMatch(q) { q = latinDigits(q || '').trim().toUpperCase().replace(/[\s-]/g, ''); return w => !q || w.n.toUpperCase().replace(/[\s-]/g, '').includes(q) || (w.p || '').toUpperCase().replace(/[\s-]/g, '').includes(q); }
   function areaWells(a, d) {
     const mode = S.ui.mode || 'type', match = wellMatch(V.q);
     let h = `<div class="seg modes">${MODES.map(([k, l]) => `<button class="${mode === k ? 'on' : ''}" data-act="mode" data-v="${k}">${l}</button>`).join('')}</div>`;
     if (mode !== 'map') h += `<div class="search"><input id="q" placeholder="دوّر على بير" value="${esc(V.q || '')}" autocomplete="off" dir="ltr"></div>`;
-    const list = WELLS.filter(w => w.a === a.id && !w.hid && match(w));
     if (mode === 'map') return h + areaMap(a, d);
+    return h + `<div id="wlist">${areaWellsList(a, d)}</div>`;
+  }
+  // the wells under the search box: typing redraws only this part, so the box and the phone's keyboard are left alone
+  function areaWellsList(a, d) {
+    const mode = S.ui.mode || 'type', match = wellMatch(V.q); let h = '';
+    const list = WELLS.filter(w => w.a === a.id && !w.hid && match(w));
     if (mode === 'route') {
       const dn = list.filter(w => wellState(w, d).done).length;
       h += `<section class="sec"><h3>بترتيب الطريق من محطة AG <small>${dn}/${list.length}</small></h3>${list.map(w => wellRow(w, d, { chip: 1 })).join('')}</section>`;
@@ -761,7 +777,7 @@
       <input class="in" id="stp" inputmode="tel" dir="ltr" placeholder="رقم التليفون (اختياري)" autocomplete="off" style="margin-top:8px">`;
   }
   function ppList() {
-    const q = PP.q.trim().toLowerCase(), qd = digits(q);
+    const q = latinDigits(PP.q).trim().toLowerCase(), qd = digits(q);
     const us = Object.values(S.users).filter(u => u.u !== ADM() && !isPending(u) && !PP.have.has(u.name) && (!q || String(u.name).toLowerCase().includes(q) || (qd.length >= 3 && digits(u.phone).includes(qd))))
       .sort((x, y) => String(x.name).localeCompare(String(y.name), 'ar'));
     return us.map(u => { const on = PP.sel.includes(u.u); return `<button type="button" class="wpi ${on ? 'on' : ''}" data-act="ppk" data-u="${esc(u.u)}"><i class="cb">${on ? ic('check') : ''}</i><b>${esc(u.name)}</b><span class="mute" dir="ltr">${esc(u.phone || '')}</span></button>`; }).join('')
@@ -1003,11 +1019,26 @@
     FM = null; formEl.hidden = true; formEl.innerHTML = ''; document.body.classList.remove('lock'); render(); setTimeout(checkAlerts, 300);
   }
   function savedTick() { const el = $('#fsv'); if (!el) return; el.innerHTML = ic('check') + 'اتحفظ'; el.classList.add('on'); clearTimeout(savedTick.t); savedTick.t = setTimeout(() => el.classList.remove('on'), 1800); }
-  function fieldHtml(w, k, prev, ro) {
-    const F = L.FIELDS[k], v = FM.v[k] ?? '';
+  function fieldHtml(w, k, prev, ro, rq) {
+    const F = L.FIELDS[k], v = FM.v[k] ?? '', star = rq && rq.includes(k) ? '<b class="rq" title="إجباري">★</b>' : '';
     if (F.k === 'csg') return `<div class="fwide"><span class="lab">CSG Status</span><div class="seg" data-csg>${[['F', 'Open to flare'], ['P', 'Open to production'], ['C', 'Closed']].map(([c, l]) => `<button type="button" class="${v === c ? 'on' : ''}" data-act="csg" data-v="${c}" ${ro}>${l}</button>`).join('')}</div></div>`;
     const pv = prev && prev.r.v[k]; const dv = prev ? L.deviations(w, { v: { [k]: v } }, prev.r)[k] : null;
-    return `<label class="fld"><span class="lab"><bdi dir="ltr">${esc(F.l)}</bdi> ${F.u ? `<em dir="ltr">${esc(F.u)}</em>` : ''}${F.sub ? `<small class="lsub" dir="ltr">${esc(F.sub)}</small>` : ''}</span><input inputmode="decimal" data-f="${k}" value="${esc(v)}" ${ro} autocomplete="off"><span class="prev" data-pv="${k}">${pv != null && pv !== '' ? `آخر مرة ${esc(pv)}` : ''}${dv ? ` <span class="w">${dv > 0 ? '+' : ''}${dv}%</span>` : ''}</span></label>`;
+    return `<label class="fld${star ? ' must' : ''}"><span class="lab"><span>${star}<bdi dir="ltr">${esc(F.l)}</bdi></span> ${F.u ? `<em dir="ltr">${esc(F.u)}</em>` : ''}${F.sub ? `<small class="lsub" dir="ltr">${esc(F.sub)}</small>` : ''}</span><input inputmode="decimal" data-f="${k}" value="${esc(v)}" ${ro} autocomplete="off"><span class="prev" data-pv="${k}">${pv != null && pv !== '' ? `آخر مرة ${esc(pv)}` : ''}${dv ? ` <span class="w">${dv > 0 ? '+' : ''}${dv}%</span>` : ''}</span></label>`;
+  }
+  // what the reading still needs (★ fields), and when the well ran again today: a reading after that time
+  function needHtml(w) {
+    if (L.openEvent(S.dt, w.id)) return '';
+    const d = viewDay(), st = wellState(w, d), p = st.p;
+    let h = '';
+    if (st.after && !p.done) h += `<div class="banner info">البير رجع اشتغل الساعة ${hmA(st.after)}. القراية لازم تبقى بعد كده: اكتب الأرقام الجديدة${p.any || (st.r && Object.keys(st.r.v || {}).length) ? ` أو دوس <button class="linkbtn inl" data-act="rdfresh">الأرقام دي بعد ما رجع</button>` : ''}</div>`;
+    if (p.need) h += `<p class="needl">${p.done ? `${ic('check')} الخانات الإجبارية كاملة` : `<b class="rq">★</b> إجباري · ناقص ${p.miss.length}: <bdi dir="ltr">${p.miss.map(fname).join(', ')}</bdi>`}</p>`;
+    return h;
+  }
+  // a WIW without a scanner: how the injection was read
+  function injmHtml(w, ro) {
+    if (w.t !== 'WIW' || w.m !== L.NOSCAN) return '';
+    const v = FM.v.INJM || '';
+    return `<div class="fwide"><span class="lab">القراية اتاخدت إزاي؟ <small class="mute">البير ده من غير سكانر</small></span><div class="seg tg2x">${Object.entries(L.INJM).map(([c, l]) => `<button type="button" class="${v === c ? 'on' : ''}" data-act="injm" data-v="${c}" ${ro}>${l}</button>`).join('')}</div></div>`;
   }
   // a reading of an old day is shown with the target / factor it was written with
   const w0 = w => w;
@@ -1086,7 +1117,8 @@
     if (w.hid) h += `<div class="banner">البير ده مخفي عن الفنيين. لو سجلت قراية، الأدمن هيعرف.</div>`;
     if (w.t === 'GL') h += `<div class="banner info">العداد: <b>${esc(w.m || (w.k > 0 ? 'Orifice' : '—'))}</b>${w.k > 0 ? ` · Factor ${w.k}` : ' · قراية مباشرة'}${w.tg ? ` · التارجت ${w.tg}` : ''}</div>`;
     if (w.disc) h += `<div class="banner">العداد Disconnected. القرايات مش إجبارية، اكتب اللي حصل في الكومنت.</div>`;
-    h += `<div class="grid">${fs.map(k => fieldHtml(w, k, prev, ro)).join('')}</div><div id="calc">${calcHtml(w)}</div>`;
+    const rq = L.reqFields(w, S.cfg);
+    h += `<div id="need">${needHtml(w)}</div><div class="grid">${fs.map(k => fieldHtml(w, k, prev, ro, rq)).join('')}</div>${injmHtml(w, ro)}<div id="calc">${calcHtml(w)}</div>`;
     const tk = tanksOf(w.id), D = dayGet(d);
     if (tk.length) {
       h += `<p class="flab">الديزل</p><section class="sec" style="margin-top:0">`;
@@ -1110,10 +1142,13 @@
     if (!keys.length && (old.n || '') === n) return;
     for (const k of keys) sessAudit(FM, 'r|' + k, w.id, w.n, k, ov[k], v[k] ?? '', d, FM.why);
     if ((old.n || '') !== n) sessAudit(FM, 'r|n', w.id, w.n, 'كومنت', old.n, n, d, FM.why);
-    if (Object.keys(v).length || n) { D.r[w.id] = Object.assign({ v, n }, stampBy()); if (w.t === 'GL' || w.t === 'WIW') { const o = old.v && 'wk' in old ? old : w0(w); D.r[w.id].wk = o === w ? w.k || 0 : o.wk; D.r[w.id].wt = o === w ? w.tg ?? null : o.wt; } } else delete D.r[w.id];
+    if (w.t === 'WIW' && w.m === L.NOSCAN && v.INJ != null && !v.INJM) { v.INJM = FM.v.INJM = 'E'; const b = document.querySelector('[data-act=injm][data-v=E]'); if (b) b.classList.add('on'); }
+    const now = Date.now(), ft = old.ft ? Object.assign({}, old.ft) : Object.fromEntries(Object.keys(ov).map(k => [k, old.t || now]));
+    for (const k of keys) { if (v[k] != null) ft[k] = now; else delete ft[k]; }
+    if (Object.keys(v).length || n) { D.r[w.id] = Object.assign({ v, n, ft }, stampBy()); if (w.t === 'GL' || w.t === 'WIW') { const o = old.v && 'wk' in old ? old : w0(w); D.r[w.id].wk = o === w ? w.k || 0 : o.wk; D.r[w.id].wt = o === w ? w.tg ?? null : o.wt; } } else delete D.r[w.id];
     mark(`r|${d}|${w.id}`);
     if (w.hid && !FM.hidAud) { FM.hidAud = 1; audit(w.id, w.n, 'قراية على بير مخفي', '', 'اتسجل', d, FM.why); }
-    save(); savedTick();
+    save(); savedTick(); const nd = $('#need'); if (nd) nd.innerHTML = needHtml(w);
   }
   function setChemPart(wid, part, c, x, d, why, fm) {
     const D = dayObj(d), old = D.c[wid] || {}, cur = Object.assign({}, old[part] || {}); x = x == null ? '' : String(x).trim();
@@ -1247,7 +1282,7 @@
 
   // ---------------- samples ----------------
   function sampleResults(aid) {
-    const q = (V.sq || '').trim();
+    const q = latinDigits(V.sq || '').trim();
     const m = WELLS.filter(w => !w.hid && (!aid || w.a === aid) && wellMatch(q)(w)).sort((a, b) => L.natural(a.n, b.n));
     return `<div class="wpl">${m.map(w => `<button type="button" class="wpi" data-act="spick" data-w="${w.id}">${tchip(w.t)} <b dir="ltr">${esc(w.n)}</b>${aid ? '' : `<span class="mute">${esc(areaOf(w.a).n)}</span>`}</button>`).join('')}${q && !m.length ? '<p class="empty">مفيش بير بالاسم ده</p>' : ''}</div>
       ${q ? `<div class="picks"><button class="pick other" data-act="sother">نقطة مش بير: <b dir="auto">${esc(q)}</b> <span class="mute">(محطة، خط، فاصل…)</span></button></div>` : '<p class="mute" style="margin:6px 2px 0">لو العينة من نقطة مش بير (محطة، خط، فاصل) اكتب اسمها فوق.</p>'}`;
@@ -1464,6 +1499,16 @@
     h += `<div class="card"><h3 style="margin:0 0 6px">نسخة احتياطية</h3><p class="mute" style="margin-top:0">${SYNC.url() ? 'الداتا بتتبعت للشيت لوحدها. النسخة دي لو حبيت تحتفظ بملف على جنب.' : 'لحد ما الموبايل يتربط بالشيت، الداتا عليه بس. ابعت نسخة كل كام يوم.'}</p><button class="btn wide" data-act="backup">ابعت نسخة احتياطية</button></div>`;
     return h + '</main>' + tabs('settings');
   }
+  // the required fields (★) of each well type: the admin taps a field to make it required or not
+  const reqOf = t => (S.cfg.req && Array.isArray(S.cfg.req[t]) ? S.cfg.req[t] : L.TYPES[t].req).filter(k => L.TYPES[t].f.includes(k));
+  function reqCard() {
+    let h = `<div class="card"><h3 style="margin:0 0 4px">الخانات الإجبارية <small class="mute">★</small></h3><p class="mute" style="margin:0 0 8px">البير ياخد ✓ لما الخانات دي كلها تتكتب. دوس على الخانة تخليها إجبارية أو لأ. في الـ Gas Lift: DS وDiff للآبار اللي ليها فاكتور، وGas للقراية المباشرة.</p>`;
+    for (const t of L.TYPE_ORDER) {
+      const T = L.TYPES[t], on = reqOf(t);
+      h += `<div class="rqrow"><b>${esc(TYPE_AR[t] || t)}</b><div class="rqcs">${T.f.filter(k => L.FIELDS[k].k !== 'csg').map(k => `<button type="button" class="rqc ${on.includes(k) ? 'on' : ''}" aria-pressed="${on.includes(k)}" data-act="rqt" data-t="${t}" data-k="${k}" dir="ltr">${esc(fname(k))}</button>`).join('')}</div></div>`;
+    }
+    return h + `${S.cfg.req && Object.keys(S.cfg.req).length ? '<button class="btn sm" style="margin-top:8px" data-act="rqdef">رجّع الافتراضي</button>' : ''}</div>`;
+  }
   function vAdmin() {
     const aid = V.a || SEED.areas[0].id, q = (V.q || '').trim().toUpperCase();
     let h = top(isAdmin() ? 'الآبار والإعدادات' : 'بيانات الآبار', isAdmin() ? 'الأدمن بس' : 'المهندس', 'settings') + '<main class="wrap">';
@@ -1471,6 +1516,7 @@
       <div class="two" style="margin-top:10px"><div><label class="lab">تنبيه فرق الجاز عن التارجت %</label><input class="in" id="cg" inputmode="numeric" value="${S.cfg.gasDiffPct}"></div><div></div></div>
       <p class="lab" style="margin-top:12px">تنبيه الكيميكال تحت %</p><div class="cmins">${L.CHEMS.map(([c, n]) => `<label class="cmin"><bdi dir="ltr">${esc(n)}</bdi><input class="in" data-cmin="${c}" inputmode="numeric" value="${L.chemMin(S.cfg, c)}"></label>`).join('')}</div>
       <button class="btn pen wide" style="margin-top:12px" data-act="cfgsave">حفظ</button></div>`;
+    if (isAdmin()) h += reqCard();
     if (isAdmin()) h += `<div class="card"><h3 style="margin:0 0 8px">الربط بالشيت</h3><label class="lab">رابط الشيت (Web app URL)</label><input class="in" id="surl" dir="ltr" value="${esc(SYNC.url())}" placeholder="https://script.google.com/macros/s/…/exec"><button class="btn pen wide" style="margin-top:8px" data-act="surlsave">حفظ وجرّب</button><p style="margin:10px 0 0" data-sync>${syncLine()}</p></div>`;
     if (isAdmin() && SYNC.url() && !(window.CONFIG && CONFIG.web)) h += `<div class="card"><h3 style="margin:0 0 6px">نسخة الآيفون والكمبيوتر</h3><p class="mute" style="margin:0 0 10px">ابعت اللينك ده للي عاوز يشتغل من آيفون أو كمبيوتر. بيفتح البرنامج مربوط بالشيت، وبيانات الآبار بتنزل بعد ما يفتحه. اللينك ده زي باسورد للشيت، متبعتوش غير لناس الشغل.</p>
       <div class="btns"><button class="btn wa" data-act="weblinkshare">${ic('share')} ابعته</button><button class="btn" data-act="weblinkcopy">انسخ</button></div><p class="mute" style="margin:8px 0 0">${S.seedPub === SEED.version ? 'بيانات الآبار متحدثة على الشيت.' : 'بيانات الآبار هتتبعت للشيت مع أول إرسال.'}</p></div>`;
@@ -1530,12 +1576,13 @@
     const w = WBY[MW], t = $('#wbt').value, x = $('#wbx'); if (!x || !w) return;
     const v = k => w.t === t && w[k] != null ? w[k] : '';
     x.innerHTML = t === 'GL' ? `<div class="two" style="margin-top:10px"><div><label class="lab">التارجت <em>MMSCFD</em></label><input class="in" id="wbg" inputmode="decimal" dir="ltr" value="${esc(v('tg'))}"></div><div><label class="lab">Factor <em>(فاضي = قراية مباشرة)</em></label><input class="in" id="wbk" inputmode="decimal" dir="ltr" value="${esc(w.t === t && w.k > 0 ? w.k : '')}"></div></div><label class="lab" style="margin-top:10px">العداد</label><input class="in" id="wbm" dir="ltr" value="${esc(v('m'))}" placeholder="Barton / Scanner">`
-      : t === 'WIW' ? `<label class="lab" style="margin-top:10px">التارجت <em>BWPD</em></label><input class="in" id="wbg" inputmode="decimal" dir="ltr" value="${esc(v('tg'))}">` : '';
+      : t === 'WIW' ? `<label class="lab" style="margin-top:10px">التارجت <em>BWPD</em></label><input class="in" id="wbg" inputmode="decimal" dir="ltr" value="${esc(v('tg'))}">
+        <div class="tgl" style="margin-top:10px"><span class="lab">عداد الحقن</span>${tg2('id="wbsc"', !(w.t === t && w.m === L.NOSCAN), 'سكانر', 'مفيش سكانر', 1)}</div>` : '';
   }
   function wellEditOk() {
     const w = WBY[MW]; if (!w) return closeModal();
     const num = id => { const el = $('#' + id); if (!el) return undefined; const x = L.normNum(el.value).trim(); return x === '' ? 0 : L.toNum(x); };
-    const t = $('#wbt').value, tg = num('wbg'), k = num('wbk'), m = $('#wbm') ? $('#wbm').value.trim() : undefined;
+    const t = $('#wbt').value, tg = num('wbg'), k = num('wbk'), m = $('#wbm') ? $('#wbm').value.trim() : $('#wbsc') ? ($('#wbsc').checked ? '' : L.NOSCAN) : undefined;
     if ((tg !== undefined && (tg == null || tg < 0)) || (k !== undefined && (k == null || k < 0))) return toast('اكتب أرقام صح');
     const ch = [...document.querySelectorAll('[data-wch]:checked')].map(x => x.dataset.wch);
     const ws = WELLS.filter(x => x.a === w.a), i = ws.findIndex(x => x.id === w.id), prevId = i > 0 ? ws[i - 1].id : '__first', sel = WP.sel[0] || prevId;
@@ -1668,6 +1715,11 @@
       case 'well': return openWell(b.dataset.w);
       case 'fclose': return closeForm();
       case 'wview': closeModal(); return openWell(b.dataset.w, null);
+      case 'rqt': { if (!isAdmin()) return; const t = b.dataset.t, k = b.dataset.k, cur = reqOf(t), nx = cur.includes(k) ? cur.filter(x => x !== k) : L.TYPES[t].f.filter(x => x === k || cur.includes(x));
+        S.cfg.req = Object.assign({}, S.cfg.req || {}, { [t]: nx }); mark('cs'); audit('cfg', 'الإعدادات', 'خانات إجبارية ' + t, cur.map(fname).join(', '), nx.map(fname).join(', '), curDay()); save(); const y = window.scrollY; render(); window.scrollTo(0, y); return; }
+      case 'rqdef': { if (!isAdmin()) return; S.cfg.req = {}; mark('cs'); audit('cfg', 'الإعدادات', 'خانات إجبارية', 'متعدلة', 'الافتراضي', curDay()); save(); const y = window.scrollY; render(); window.scrollTo(0, y); return toast('رجعت الافتراضي'); }
+      case 'injm': if (!FM || formRo()) return; FM.v.INJM = b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); return commitReading();
+      case 'rdfresh': { if (!FM || formRo()) return; const w = FM.w, d = viewDay(), r = dayObj(d).r[w.id]; if (!r) return; const now = Date.now(); r.ft = Object.fromEntries(Object.keys(r.v || {}).map(k => [k, now])); r.t = now; mark(`r|${d}|${w.id}`); audit(w.id, w.n, 'القراية بعد ما رجع', '', 'نفس الأرقام', d); save(); const nd = $('#need'); if (nd) nd.innerHTML = needHtml(w); return toast('اتسجلت إن القراية بعد ما البير رجع'); }
       case 'csg': if (!FM || formRo()) return; FM.v.CSG = FM.v.CSG === b.dataset.v ? '' : b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.v === FM.v.CSG)); return commitReading();
       case 'chnow': { const tin = document.getElementById(`cft-${b.dataset.chw}-${b.dataset.chc}`); if (!tin) return; const now = new Date(), H0 = now.getHours(), night = H0 >= 18 || H0 < 6;
         tin.querySelector('.th').value = night ? (H0 >= 18 ? H0 - 12 : H0 === 0 ? 12 : H0) : (H0 <= 12 ? H0 : H0 - 12); tin.querySelector('.tm').value = String(now.getMinutes()).padStart(2, '0');
@@ -1754,23 +1806,35 @@
       }
     }
   });
+  /* Arabic digits: the phone's keyboard writes a word in steps (a "composition"); changing the box while it writes makes it
+     write again (٤٥ became 4545). So the box's text is changed only after the keyboard is done; the value kept is already
+     in English digits. */
+  let COMPOSING = false;
+  const latinDigits = v => String(v).replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d));
+  document.addEventListener('compositionstart', () => { COMPOSING = true; }, true);
+  document.addEventListener('compositionend', e => { COMPOSING = false; const t = e.target; if (t && typeof t.value === 'string') t.dispatchEvent(new Event('input', { bubbles: true })); }, true);
+  const NUMBOX = t => !!(t.dataset && (t.dataset.f || t.dataset.ftk || t.dataset.chw || t.dataset.pt || t.dataset.tk)) || !!(t.closest && t.closest('.tin'));
   document.addEventListener('input', e => {
-    const t = e.target;
-    if (t.dataset.f && FM) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; FM.v[t.dataset.f] = n; if (['DS', 'DIFF', 'GINJ', 'INJ'].includes(t.dataset.f)) refreshCalc(); return; }
-    if (t.dataset.ftk && FM) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x <= 100 && x < S.cfg.dieselMin); return; }
-    if (t.dataset.chw && t.dataset.chp) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; const x = L.toNum(n), part = t.dataset.chp; t.classList.toggle('bad', n.trim() !== '' && chemBad(part, x)); if (part === 'v') t.classList.toggle('low', x != null && x >= 0 && x <= 100 && x < L.chemMin(S.cfg, t.dataset.chc)); return; }
-    if (t.closest && t.closest('.tin[data-chp]')) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; t.classList.remove('bad'); return; }
+    const t = e.target, comp = COMPOSING || e.isComposing;
+    const setV = n => { if (comp || n === t.value) return; let p = null; try { p = t.selectionStart; } catch (x) { } t.value = n; try { if (p != null) t.setSelectionRange(Math.min(p, n.length), Math.min(p, n.length)); } catch (x) { } };
+    if (!comp && typeof t.value === 'string' && t.type !== 'file' && !NUMBOX(t) && /[٠-٩۰-۹]/.test(t.value)) setV(latinDigits(t.value));   // names, search, notes: English digits
+    if (t.dataset.f && FM) { const n = L.normNum(t.value); setV(n); FM.v[t.dataset.f] = n; if (['DS', 'DIFF', 'GINJ', 'INJ'].includes(t.dataset.f)) refreshCalc(); return; }
+    if (t.dataset.ftk && FM) { const n = L.normNum(t.value); setV(n); const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x <= 100 && x < S.cfg.dieselMin); return; }
+    if (t.dataset.chw && t.dataset.chp) { const n = L.normNum(t.value); setV(n); const x = L.toNum(n), part = t.dataset.chp; t.classList.toggle('bad', n.trim() !== '' && chemBad(part, x)); if (part === 'v') t.classList.toggle('low', x != null && x >= 0 && x <= 100 && x < L.chemMin(S.cfg, t.dataset.chc)); return; }
+    if (t.closest && t.closest('.tin[data-chp]')) { const n = L.normNum(t.value); setV(n); t.classList.remove('bad'); return; }
     if (t.id === 'ppq' && PP) { PP.q = t.value; ppRefresh(true); return; }
     if (t.id === 'wpq' && WP) { WP.q = t.value; wpRefresh(true); return; }
     if (t.id === 'sq') { V.sq = t.value; V.spt = ''; const r = $('#sres'); if (r) r.innerHTML = sampleResults(V.v === 'area' ? V.a : null); return; }
     if (t.id === 'fn' && FM) { FM.n = t.value; return; }
-    if (t.dataset.pt || t.dataset.tk) { const n = L.normNum(t.value); if (n !== t.value) t.value = n; if (t.dataset.tk) { const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x <= 100 && x < S.cfg.dieselMin); } return; }
-    if (t.id === 'q') { V.q = t.value; const pos = t.selectionStart; render(); const q = $('#q'); if (q) { q.focus(); q.setSelectionRange(pos, pos); } return; }
+    if (t.dataset.pt || t.dataset.tk) { const n = L.normNum(t.value); setV(n); if (t.dataset.tk) { const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x <= 100 && x < S.cfg.dieselMin); } return; }
+    if (t.id === 'q') { V.q = t.value; const box = $('#wlist'), a = V.v === 'area' && areaOf(V.a); if (box && a) box.innerHTML = areaWellsList(a, viewDay()); return; }
+    if ((t.id === 'aq' || t.id === 'uq') && comp) { V.q = t.value; return; }   // redrawn when the keyboard is done with the word
     if (t.id === 'aq' || t.id === 'uq') { V.q = t.value; const pos = t.selectionStart, id = t.id; render(); const q = $('#' + id); if (q) { q.focus(); q.setSelectionRange(pos, pos); } return; }
     if (t.id === 'lu') { V.lu = t.value; return; }
   });
   document.addEventListener('change', e => {
     const t = e.target;
+    if (typeof t.value === 'string' && t.type !== 'file' && /[٠-٩۰-۹٫،]/.test(t.value)) { const n = NUMBOX(t) ? L.normNum(t.value) : latinDigits(t.value); if (n !== t.value) t.value = n; }
     if (t.dataset.pt) { const x = L.toNum(t.value); if (t.value !== '' && x == null) { toast('اكتب رقم'); return; } setPoint(t.dataset.pt, t.dataset.h, t.value, viewDay()); return toast('اتحفظ'); }
     if (t.dataset.tk) { const x = L.toNum(t.value); if (t.value !== '' && (x == null || x < 0 || x > 100)) { t.classList.add('bad'); return toast('نسبة الديزل لازم تبقى من 0 لـ 100'); } t.classList.remove('bad'); if (!setTank(t.dataset.tk, t.value, viewDay())) return; save(); return toast(x != null && x < S.cfg.dieselMin ? `اتحفظ. الديزل تحت ${S.cfg.dieselMin}%` : 'اتحفظ'); }
     if (t.dataset.chw && t.dataset.chp) return saveChemInput(t);
@@ -1897,7 +1961,8 @@
     if (st.running) return `<span class="sy run">بيبعت…</span>`;
     if (st.err && st.net) return `<span class="sy off">${esc(st.err)}${st.pending ? ` · ${st.pending} مستني يتبعت لما النت يرجع` : ''}</span>`;
     if (st.err) return `<span class="sy bad">مقدرش يبعت: ${esc(st.err)}${st.pending ? ` · ${st.pending} مستني` : ''}</span>`;
-    return `<span class="sy ok">${st.pending ? `${st.pending} مستني يتبعت` : 'كله اتبعت'}${st.last ? ' · آخر مرة ' + hmA(st.last) : ''}</span>`;
+    const ar = /^ar/i.test(navigator.language || 'ar'), last = st.last ? (ar ? 'آخر تحديث ' + hmA(st.last) : 'Last update ' + new Date(st.last).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })) : '';
+    return `<span class="sy ok">${[st.pending ? (ar ? `${st.pending} مستني يتبعت` : `${st.pending} waiting to send`) : '', last].filter(Boolean).join(' · ') || (ar ? 'متربط بالشيت' : 'Linked')}</span>`;
   }
   // keep the last errors so they can be sent from the settings screen
   const HARMLESS = /cancel(l)?ed|AbortError|ResizeObserver loop|^Script error\.?/i;

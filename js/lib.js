@@ -14,15 +14,17 @@
     TEMP: { l: 'Temperature', u: '°F', s: 'Temp' }, GINJ: { l: 'Gas Injection', u: 'MMSCFD', s: 'Gas' }, INJ: { l: 'Injection Rate', u: 'BWPD', s: 'Inj' },
   };
   const TYPES = {
-    NF: { n: 'Natural Flow', f: ['WHP', 'FLP', 'CSGP', 'CHK', 'SSSV', 'SSV'], key: ['WHP', 'FLP'] },
-    PL: { n: 'Plunger Lift', f: ['WHP', 'FLP', 'CSGP'], key: ['WHP', 'FLP', 'CSGP'] },
-    ESP: { n: 'ESP', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'AMP', 'HZ', 'PI', 'PD', 'TI', 'TM'], key: ['WHP', 'AMP', 'HZ', 'PI'] },
-    SRP: { n: 'SRP', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'RUN', 'INFO', 'FILL', 'PSPD', 'PEAK', 'MINL', 'FLD', 'SPM'], key: ['WHP', 'RUN', 'FILL', 'PSPD'] },
-    WSW: { n: 'WSW', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'AMP', 'HZ', 'PI', 'PD', 'TI', 'TM'], key: ['WHP', 'AMP', 'HZ'] },
-    WIW: { n: 'WIW', f: ['WHIP', 'FLP', 'CSGP', 'CSG', 'INJ'], key: ['WHIP', 'INJ'] },
-    GL: { n: 'Gas Lift', f: ['WHIP', 'FLP', 'DS', 'US', 'DIFF', 'TEMP', 'GINJ'], key: ['WHIP', 'DS', 'DIFF', 'GINJ'] },
+    NF: { n: 'Natural Flow', f: ['WHP', 'FLP', 'CSGP', 'CHK', 'SSSV', 'SSV'], key: ['WHP', 'FLP'], req: ['WHP', 'FLP'] },
+    PL: { n: 'Plunger Lift', f: ['WHP', 'FLP', 'CSGP'], key: ['WHP', 'FLP', 'CSGP'], req: ['WHP', 'CSGP'] },
+    ESP: { n: 'ESP', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'AMP', 'HZ', 'PI', 'PD', 'TI', 'TM'], key: ['WHP', 'AMP', 'HZ', 'PI'], req: ['WHP', 'AMP', 'HZ'] },
+    SRP: { n: 'SRP', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'RUN', 'INFO', 'FILL', 'PSPD', 'PEAK', 'MINL', 'FLD', 'SPM'], key: ['WHP', 'RUN', 'FILL', 'PSPD'], req: ['WHP', 'RUN', 'INFO', 'FILL', 'PSPD'] },
+    WSW: { n: 'WSW', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'AMP', 'HZ', 'PI', 'PD', 'TI', 'TM'], key: ['WHP', 'AMP', 'HZ'], req: ['WHP', 'AMP', 'HZ'] },
+    WIW: { n: 'WIW', f: ['WHIP', 'FLP', 'CSGP', 'CSG', 'INJ'], key: ['WHIP', 'INJ'], req: ['WHIP', 'INJ'] },
+    GL: { n: 'Gas Lift', f: ['WHIP', 'FLP', 'DS', 'US', 'DIFF', 'TEMP', 'GINJ'], key: ['WHIP', 'DS', 'DIFF', 'GINJ'], req: ['WHIP', 'DS', 'DIFF', 'GINJ'] },
   };
   const CSG = { F: 'Open to flare', P: 'Open to production', C: 'Closed' };
+  // a WIW without a scanner: the injection is read with an ultrasonic meter or estimated
+  const NOSCAN = 'No scanner', INJM = { U: 'Ultrasonic', E: 'Estimated' };
   const TYPE_ORDER = ['ESP', 'SRP', 'GL', 'NF', 'PL', 'WSW', 'WIW'];
   const natural = (a, b) => a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' });
   function dist(a, b) { const R = 6371000, p1 = a[1] * Math.PI / 180, p2 = b[1] * Math.PI / 180, dl = (b[0] - a[0]) * Math.PI / 180, dp = p2 - p1; const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); }
@@ -68,6 +70,24 @@
   }
   function reasonsFor() { return [...SIMPLE_REASONS.map(x => x[0]), OTHER]; }
 
+  /* the fields a reading must have for the well to be done (★ in the form). Gas Lift: DS and Diff when the well has a factor,
+     the gas reading itself when it is read directly; a disconnected meter needs no gas fields. */
+  function reqFields(w, cfg) {
+    const T = TYPES[w.t]; if (!T) return [];
+    let r = (cfg && cfg.req && Array.isArray(cfg.req[w.t]) ? cfg.req[w.t] : T.req).filter(k => T.f.includes(k));
+    if (w.t === 'GL') r = r.filter(k => w.k > 0 ? k !== 'GINJ' : k !== 'DS' && k !== 'DIFF');
+    if (w.disc) r = r.filter(k => !['DS', 'DIFF', 'GINJ', 'US'].includes(k));
+    return r;
+  }
+  /* how far the day's reading is: need / have / miss; after = the well ran again at that time, so only values written after
+     it count (ft: when each value was written) */
+  function progress(w, r, cfg, after) {
+    const need = reqFields(w, cfg), v = (r && r.v) || {}, ft = (r && r.ft) || {};
+    const fresh = k => !after || (ft[k] || (r && r.t) || 0) >= after;
+    const miss = need.filter(k => !(v[k] != null && v[k] !== '' && fresh(k)));
+    const any = isDone(r) && (!after || ((r && r.t) || 0) >= after);
+    return { need: need.length, have: need.length - miss.length, miss, done: need.length ? !miss.length : any, any };
+  }
   function isDone(r) { return !!r && (Object.values(r.v || {}).some(x => x !== '' && x != null) || !!(r.n && r.n.trim())); }
   function summary(w, r) {
     if (!r) return ''; const T = TYPES[w.t]; const ks = T.key.filter(k => r.v && r.v[k] != null && r.v[k] !== '');
@@ -105,7 +125,7 @@
     const sheets = [];
     const order = ['NF', 'PL', 'ESP', 'SRP', 'WSW', 'WIW', 'GL'];
     for (const t of order) {
-      const fs = TYPES[t].f, extra = t === 'GL' ? ['Metering', 'Factor', 'Gas Inj (MMSCFD)', 'Target (MMSCFD)', 'Diff %'] : t === 'WIW' ? ['Target (BWPD)', '% of target'] : [];
+      const fs = TYPES[t].f, extra = t === 'GL' ? ['Metering', 'Factor', 'Gas Inj (MMSCFD)', 'Target (MMSCFD)', 'Diff %'] : t === 'WIW' ? ['Target (BWPD)', '% of target', 'Inj. reading'] : [];
       const rows = [['Prod. Day', 'Area', 'Table', 'Well', 'Status', 'Hours online', ...fs.map(k => (FIELDS[k].sub ? `${FIELDS[k].l} (${FIELDS[k].sub})` : FIELDS[k].l) + (FIELDS[k].u ? ` (${FIELDS[k].u})` : '')), ...extra, 'Comment', 'Technician', 'Time']];
       for (const day of days) {
         const D = S.days[day];
@@ -116,7 +136,7 @@
           const vals = fs.map(k => { const v = r && r.v[k]; if (v == null || v === '') return null; if (FIELDS[k].k === 'csg') return CSG[v] || v; const x = toNum(v); return x == null ? v : x; });
           let ex = [];
           if (t === 'GL') { const q = r ? gasValue(wq, r.v) : null; const g = gasDiff(wq, q, S.cfg.gasDiffPct); ex = [wq.m || (wq.k ? 'Orifice' : ''), wq.k || null, q == null ? null : Math.round(q * 1000) / 1000, wq.tg || null, g ? { v: g.d, warn: g.bad } : null]; }
-          if (t === 'WIW') { const inj = r ? toNum(r.v.INJ) : null; ex = [wq.tg || null, wq.tg > 0 && inj != null ? Math.round(inj / wq.tg * 1000) / 10 : null]; }
+          if (t === 'WIW') { const inj = r ? toNum(r.v.INJ) : null; ex = [wq.tg || null, wq.tg > 0 && inj != null ? Math.round(inj / wq.tg * 1000) / 10 : null, inj == null ? null : INJM[r.v.INJM] || (wq.m === NOSCAN ? 'Estimated' : 'Scanner')]; }
           const [, de] = dayWindow(day, h), atEnd = Math.min(de, now), downNow = S.dt.some(e => e.w === w.id && e.s <= atEnd && (e.e == null || e.e > atEnd));
           rows.push([{ date: day }, AREA_N(seed, w.a), w.sec, w.n, downNow ? 'Down' : up.down > 0 ? 'Online (partial)' : 'Online', up.up, ...vals, ...ex, r && r.n || '', r && r.byn || '', r ? hhmm(r.t) : '']);
         }
@@ -186,6 +206,6 @@
     h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
     return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
   }
-  const api = { wAt, uhash, CHEMS, CHEM_N, CHEM_MIN, chemMin, FIELDS, TYPES, CSG, TYPE_ORDER, SIMPLE_REASONS, avocet, natural, dist, bearing, OTHER, INTERMITTENT, ymd, hhmm, stamp, addDays, prodDay, dayWindow, normNum, toNum, gasCalc, gasValue, gasDiff, openEvent, downMs, uptime, reasonsFor, isDone, summary, deviations, checks, exportSheets };
+  const api = { NOSCAN, INJM, reqFields, progress, wAt, uhash, CHEMS, CHEM_N, CHEM_MIN, chemMin, FIELDS, TYPES, CSG, TYPE_ORDER, SIMPLE_REASONS, avocet, natural, dist, bearing, OTHER, INTERMITTENT, ymd, hhmm, stamp, addDays, prodDay, dayWindow, normNum, toNum, gasCalc, gasValue, gasDiff, openEvent, downMs, uptime, reasonsFor, isDone, summary, deviations, checks, exportSheets };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.L = api;
 })(typeof self !== 'undefined' ? self : this);

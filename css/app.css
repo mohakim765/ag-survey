@@ -463,3 +463,17 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .rgn li:first-child{border-top:0}
 .rgn .rgx{font-size:12px;color:var(--mute)}
 .rgd .rgx{margin-top:4px}
+/* ★ required fields, a reading that is part done (2/4), what is still missing */
+.rq{color:var(--pen);font-size:13px;margin-inline-end:3px}
+.fld.must{border-color:var(--grid)}
+.mk.pt{width:auto;min-width:28px;padding:0 5px;border-radius:9px;font-style:normal;font-size:11.5px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--warn);background:var(--warn2);border:1px dashed var(--warn);display:inline-flex;align-items:center;justify-content:center;height:28px}
+.needl{margin:12px 0 0;font-size:13px;color:var(--mute);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.needl svg{width:16px;height:16px;color:var(--ok)}
+.linkbtn.inl{display:inline;min-height:0;padding:0;border:0;background:none;color:var(--pen);font:inherit;font-weight:800;text-decoration:underline}
+.rqrow{padding:8px 0;border-top:1px solid var(--rule)}
+.rqrow>b{display:block;font-size:14px;margin-bottom:6px}
+.rqcs{display:flex;flex-wrap:wrap;gap:6px}
+.rqc{min-height:40px;padding:4px 10px;border:1.5px solid var(--grid);border-radius:10px;background:var(--paper);color:var(--ink);font:inherit;font-size:13px;font-weight:600}
+.rqc.on{background:var(--pen);border-color:var(--pen);color:var(--onpen);font-weight:800}
+.rqc.on::before{content:"\2605\00a0"}
+.tg2x button{min-height:44px}
