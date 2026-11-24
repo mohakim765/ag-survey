@@ -19,7 +19,13 @@
   function matcher(wells, alias) {
     const byKey = new Map(), byBase = new Map(), byId = new Map(wells.map(w => [w.id, w]));
     for (const w of wells) for (const n of [w.n, w.p]) { if (!n) continue; if (!byKey.has(key(n))) byKey.set(key(n), w); const b = base(n); if (!byBase.has(b)) byBase.set(b, new Set()); byBase.get(b).add(w); }
-    return n => { const a = alias && alias[key(n)]; if (a && byId.has(a)) return byId.get(a); const w = byKey.get(key(n)); if (w) return w; const s = byBase.get(base(n)); return s && s.size === 1 ? [...s][0] : null; };
+    const loose = n => base(n).replace(/([A-Z])\1+/g, '$1'), byLoose = new Map();
+    for (const w of wells) for (const n of [w.n, w.p]) { if (!n) continue; const l = loose(n); if (!byLoose.has(l)) byLoose.set(l, new Set()); byLoose.get(l).add(w); }
+    return n => {
+      for (const k of [key(n), base(n)]) { const a = alias && alias[k]; if (a && byId.has(a)) return byId.get(a); }
+      const w = byKey.get(key(n)); if (w) return w; const s = byBase.get(base(n)); if (s && s.size === 1) return [...s][0];
+      const l = byLoose.get(loose(n)); return l && l.size === 1 ? [...l][0] : null;   // a name spelled with one letter doubled or not, only when one well fits
+    };
   }
   const HEAD = [['st', /^status$/], ['hrs', /hrs\.?\s*online|operation\s*hrs/], ['cause', /downtime\s*cause/], ['req', /req\.?\s*inj/], ['act', /actual\s*inj/], ['k', /^factor$/], ['opt', /opt\.?\s*inj/], ['lg', /lift\s*gas/]];
   const txt = v => typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
@@ -46,6 +52,19 @@
     }
     return out;
   }
+  // the engineering report's "[9] Work Over Activity": "● <well> (EDC-…)", then its "Operation" line
+  function rigWells(sh) {
+    const rows = [...sh.cells.keys()].sort((a, b) => a - b), out = []; let on = false;
+    for (const r of rows) {
+      const m = sh.cells.get(r), t = txt(m.get(1) == null ? '' : String(m.get(1)));
+      if (/^\[\s*9\s*\]/.test(t) && /work\s*over/i.test(t)) { on = true; continue; }
+      if (!on) continue; if (/^\[\s*\d+\s*\]/.test(t)) break;
+      const g = /^[●•]\s*(.+?)\s*\(\s*([^)]+?)\s*\)/.exec(t);
+      if (g && isWell(g[1])) out.push({ n: g[1], rig: g[2], row: r });
+      else if (out.length && /^operation$/i.test(t)) out[out.length - 1].op = txt(String(m.get(2) == null ? '' : m.get(2))).slice(0, 80);
+    }
+    return out;
+  }
   const MON = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12 };
   const p2 = n => String(n).padStart(2, '0');
   function fileDate(name) {
@@ -59,8 +78,9 @@
     let date = fileDate(fileName);
     if (!date) for (const s of secs) { const sh = sheets.find(x => x.name === s.sheet); for (const r of [1, 2]) for (const [, v] of sh.cells.get(r) || []) if (!date && typeof v === 'number' && v > 40000 && v < 60000) date = serialDay(v); }
     const has = k => secs.some(s => s.cols.includes(k));
-    const kind = has('st') && has('hrs') && secs.some(s => /well data|water flood/i.test(s.sheet)) ? 'oil' : has('k') || has('opt') ? 'gas' : has('st') ? 'status' : 'other';
-    return { name: fileName, date, kind, sections: secs.map(s => ({ sheet: s.sheet, row: s.row, cols: s.cols, n: s.rows.length })), rows: secs.flatMap(s => s.rows.map(r => Object.assign(r, { cols: s.cols }))) };
+    const eng = sheets.find(s => /dist\.?\s*eng/i.test(s.name));
+    const kind = eng ? 'eng' : has('st') && has('hrs') && secs.some(s => /well data|water flood/i.test(s.sheet)) ? 'oil' : has('k') || has('opt') ? 'gas' : has('st') ? 'status' : 'other';
+    return { name: fileName, date, kind, rig: eng ? rigWells(eng) : [], sections: secs.map(s => ({ sheet: s.sheet, row: s.row, cols: s.cols, n: s.rows.length })), rows: secs.flatMap(s => s.rows.map(r => Object.assign(r, { cols: s.cols }))) };
   }
   // the status words of the reports
   const STOP = /^(S\.?\s*\/?\s*I|SHUT[\s-]*IN|P\s*&\s*A|T\.?A\.?|P\.?A\.?)$/i;
@@ -72,6 +92,10 @@
      ask    - the engineer says whether the type changed: the well is only in tables of another type (then nothing is done
               from them until he says it changed), or the status says another lift type. o.ty = { wellId: new type }
      dup    - the same well twice in tables of its type, one stopped and one running, or with two targets: nothing is done
+     xs     - the production and the engineering reports (same day) disagree whether the well is stopped (on a rig counts
+              as stopped): nothing is closed until the engineer says "close it" (o.xs = { wellId: 'close' })
+     xd     - other differences between the two: hours, lift gas, lift type, a well only in the engineering report
+     xdate  - the two reports are not of the same day: they are not compared
      close  - stopped in the report, running in the app, shown to the technicians: they get a stop from the start of the report's day
      keep   - stopped in the report, but the app has the well running again after the report's day began: not closed
      (an older report still closes: a well that ran again since then is set running by whoever sees it; stale only warns)
@@ -84,7 +108,10 @@
   const stOf = r => String(r.st == null ? '' : r.st).trim();
   const isWater = r => /water|inj|wsw/i.test(r.sheet) || r.cols.includes('req');
   const tableOf = r => r.fk === 'gas' ? 'gas' : isWater(r) ? 'water' : 'oil';   // the gas sheet first: its name has "Injection" in it
-  const fitsT = (t, r) => { const k = tableOf(r); return k === 'water' ? WATER(t) : k === 'gas' ? t === 'GL' : !WATER(t); };
+  const fitsT = (t, r) => { if (r.rig) return true; const k = tableOf(r); return k === 'water' ? WATER(t) : k === 'gas' ? t === 'GL' : !WATER(t); };
+  const isStop = r => !!r.rig || STOP.test(stOf(r));
+  const r2 = v => Math.round(v * 100) / 100;
+  const desc = r => r.rig ? 'على الحفار ' + r.rig : `${stOf(r) || '—'}${num(r.hrs) != null ? ' ' + num(r.hrs) + ' ساعة' : ''}`;
   // the type the table says: the Gas Lift sheet -> GL, a water table -> INJ / WSW, an oil table -> the status (G/L, ESP …) or lift gas
   const guess = r => {
     const k = tableOf(r), s = TYPE[stOf(r).toUpperCase()];
@@ -92,21 +119,29 @@
     return s && !WATER(s) ? s : num(r.lg) > 0 ? 'GL' : null;
   };
   function plan(o) {
-    const L = o.L, ty = o.ty || {}, [s0, e0] = L.dayWindow(o.day, o.h), stale = o.day < L.addDays(o.today, -1);
+    const L = o.L, ty = o.ty || {}, xs = o.xs || {}, [s0, e0] = L.dayWindow(o.day, o.h), stale = o.day < L.addDays(o.today, -1);
     const wells = o.wells.map(w => ty[w.id] && ty[w.id] !== w.t ? Object.assign({}, w, { t: ty[w.id], t0: w.t }) : w);
     const mt = matcher(wells, o.alias);
     o.files.forEach((f, i) => f.rows.forEach(r => { r.fk = f.kind; r.fi = i; }));
     const hasSt = r => r.cols.includes('st') && r.cols.includes('hrs');
-    const oil = o.files.filter(f => f.kind === 'oil'), src = oil.length ? oil : o.files.filter(f => f.rows.some(hasSt));
+    // the wells on the work-over rigs count as stopped rows of the engineering report
+    const rowsOf = f => f.rows.concat((f.rig || []).map(g => ({ n: g.n, st: 'W.O', hrs: 0, cause: 'Workover ' + g.rig, sheet: 'Work Over', row: 'rig' + g.row, cols: ['st', 'hrs', 'cause'], rig: g.rig, fk: f.kind, fi: o.files.indexOf(f) })));
+    // status: the production report; without it, any file with a status and hours (the engineering report, the Gas Lift sheet)
+    const oil = o.files.filter(f => f.kind === 'oil'), engs = o.files.filter(f => f.kind === 'eng');
+    const src = oil.length ? oil : o.files.filter(f => (f.rig || []).length || f.rows.some(hasSt));
     // every row of each well (a table read twice through two headers on one line is one row)
-    const by = new Map(), miss = [];
-    for (const f of src) for (const r of f.rows) {
-      if (!hasSt(r)) continue; const w = mt(r.n);
-      if (!w) { if (!miss.some(x => key(x.n) === key(r.n))) miss.push(r); continue; }
-      const g = by.get(w.id) || by.set(w.id, { w, rows: [] }).get(w.id);
-      if (!g.rows.some(x => x.fi === r.fi && x.sheet === r.sheet && x.row === r.row)) g.rows.push(r);
-    }
-    const P = { day: o.day, stale, ask: [], dup: [], close: [], keep: [], running: [], hidRun: [], hrs: [], tg: [], miss, absent: [], hidStop: 0, nSt: by.size };
+    const group = (files, miss) => {
+      const by = new Map();
+      for (const f of files) for (const r of rowsOf(f)) {
+        if (!hasSt(r)) continue; const w = mt(r.n);
+        if (!w) { if (miss && !miss.some(x => key(x.n) === key(r.n))) miss.push(r); continue; }
+        const g = by.get(w.id) || by.set(w.id, { w, rows: [] }).get(w.id);
+        if (!g.rows.some(x => x.fi === r.fi && x.sheet === r.sheet && x.row === r.row)) g.rows.push(r);
+      }
+      return by;
+    };
+    const miss = [], by = group(src, miss);
+    const P = { day: o.day, stale, ask: [], dup: [], xs: [], xd: [], xdate: null, close: [], keep: [], running: [], hidRun: [], hrs: [], tg: [], miss, absent: [], hidStop: 0, nSt: by.size };
     const st = new Map();
     for (const { w, rows } of by.values()) {
       const t0 = w.t0 || w.t, set = ty[w.id] && ty[w.id] !== t0 ? ty[w.id] : null, fit0 = rows.filter(r => fitsT(t0, r));
@@ -116,18 +151,44 @@
       if (ask && !w.hid) P.ask.push(Object.assign(ask, { w, from: t0, set }));
       if (ask && ask.why === 'table' && !set) continue;   // only in tables of another type: nothing is done until the type is confirmed
       const use = rows.filter(r => fitsT(w.t, r)); if (!use.length) continue;
-      const stops = use.map(r => STOP.test(stOf(r)));
+      const stops = use.map(isStop);
       if (stops.some(Boolean) && !stops.every(Boolean)) { if (!w.hid) P.dup.push({ w, rows: use }); continue; }
       st.set(w.id, { w, r: use.find(r => num(r.hrs) != null) || use[0] });
     }
-    for (const { w, r } of st.values()) {
-      const stop = STOP.test(stOf(r)), hrs = num(r.hrs), open = L.openEvent(o.dt, w.id);
-      if (stop && !open) {
-        if (w.hid) { P.hidStop++; continue; }
-        const later = o.dt.filter(e => e.w === w.id && e.e != null && e.e > s0).sort((a, b) => b.e - a.e)[0];
-        if (later) P.keep.push({ w, r, e: later }); else P.close.push({ w, r });
-      } else if (!stop && hrs > 0) { if (open && open.s < e0 && !w.hid) P.running.push({ w, r, e: open }); if (w.hid) P.hidRun.push({ w, r }); }
+    /* the production report against the engineering report (same day only): the status they disagree on is asked
+       (o.xs = { wellId: 'close' }; until then nothing is closed from either), the rest is listed */
+    const xsm = new Map(), oD = oil.map(f => f.date).filter(Boolean).sort().pop(), eD = engs.map(f => f.date).filter(Boolean).sort().pop();
+    if (oil.length && engs.length && oD && eD && oD !== eD) P.xdate = { oil: oD, eng: eD };
+    else if (oil.length && engs.length) {
+      for (const { w, rows } of group(engs, null).values()) {
+        if (w.hid) continue;
+        const re = rows.find(r => r.rig) || rows.find(r => fitsT(w.t, r)); if (!re) continue;
+        const u = st.get(w.id), rp = u ? u.r : null;
+        if (!rp && by.has(w.id)) continue;   // in the production report, but its rows wait for a question
+        const sp = rp ? isStop(rp) : false, se = isStop(re);
+        if (!rp && !se) { P.xd.push({ w, x: 'في تقرير الهندسية بس: ' + desc(re) }); continue; }
+        if (sp !== se) { const c = { w, rp, re, prodStop: sp, set: xs[w.id] === 'close' ? 'close' : null }; P.xs.push(c); xsm.set(w.id, c); continue; }
+        const d = [];
+        if (!sp) {
+          const hp = num(rp.hrs), he = num(re.hrs); if (hp != null && he != null && Math.abs(hp - he) >= 1) d.push(`الساعات: الإنتاج ${hp} · الهندسية ${he}`);
+          const gp = num(rp.lg), ge = num(re.lg); if (gp > 0 && ge > 0 && Math.abs(gp - ge) >= 0.05) d.push(`Lift gas: الإنتاج ${r2(gp)} · الهندسية ${r2(ge)}`);
+          const tp = TYPE[stOf(rp).toUpperCase()], te = TYPE[stOf(re).toUpperCase()]; if (tp && te && tp !== te) d.push(`النوع: الإنتاج ${stOf(rp)} · الهندسية ${stOf(re)}`);
+        }
+        if (d.length) P.xd.push({ w, x: d.join(' · ') });
+      }
     }
+    const closeOrKeep = (w, r) => {
+      if (w.hid) { P.hidStop++; return; }
+      const later = o.dt.filter(e => e.w === w.id && e.e != null && e.e > s0).sort((a, b) => b.e - a.e)[0];
+      if (later) P.keep.push({ w, r, e: later }); else P.close.push({ w, r });
+    };
+    for (const { w, r } of st.values()) {
+      const c = xsm.get(w.id), stop = c ? c.set === 'close' : isStop(r), hrs = num(r.hrs), open = L.openEvent(o.dt, w.id);
+      if (stop && !open) closeOrKeep(w, c && !c.prodStop ? c.re : r);
+      else if (!stop && hrs > 0) { if (open && open.s < e0 && !w.hid) P.running.push({ w, r, e: open }); if (w.hid) P.hidRun.push({ w, r }); }
+    }
+    // stopped only in the engineering report (on a rig), not in the production report: closed when the engineer says so
+    for (const c of P.xs) if (!c.rp && c.set === 'close' && !L.openEvent(o.dt, c.w.id)) closeOrKeep(c.w, c.re);
     // hours online on the report's day, with the stops that are about to be added
     if (e0 <= o.now) {
       const dt = o.dt.concat(P.close.map(x => ({ w: x.w.id, s: s0, e: null })));
@@ -150,5 +211,5 @@
     if (oil.length) P.absent = wells.filter(w => !w.hid && !by.has(w.id));
     return P;
   }
-  root.REP = { toks, key, base, matcher, sections, extract, fileDate, serialDay, STOP, TYPE, num, plan, tableOf };
+  root.REP = { toks, key, base, matcher, sections, extract, fileDate, serialDay, STOP, TYPE, num, plan, tableOf, desc, rigWells };
 })(typeof self !== 'undefined' ? self : this);

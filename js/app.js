@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.11';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.12';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1285,6 +1285,7 @@
   let RP = null; // the files being read: { files, day, plan, rec } or { busy } or { err }
   const repIt = (w, x) => ({ i: w.id, n: w.n, x: x || '' });
   const REP_TB = { gas: 'في شيت الجاز ليفت', water: 'في جدول آبار المية', oil: 'في جدول آبار الزيت' };
+  const repXs = c => `الإنتاج: ${c.rp ? REP.desc(c.rp) : 'مش موجود'} · الهندسية: ${REP.desc(c.re)}`;
   const repWhy = a => `في البرنامج ${TYPE_AR[a.from] || a.from} · ${a.why === 'table' ? REP_TB[REP.tableOf(a.r)] : 'في التقرير'}: ${a.r.st || '—'}`;
   function repRecord(P, files) {
     const n = v => REP.num(v), u = me();
@@ -1295,13 +1296,16 @@
       hrs: P.hrs.map(c => repIt(c.w, `التقرير ${c.rep} ساعة · البرنامج ${c.app}${c.r.cause ? ' · ' + c.r.cause : ''}`)),
       types: P.ask.map(a => repIt(a.w, `${repWhy(a)} · ${a.set ? 'اتغير لـ ' + (TYPE_AR[a.set] || a.set) : 'متغيرش، فضل ' + (TYPE_AR[a.from] || a.from)}`)),
       ask: P.ask.map(a => ({ i: a.w.id, n: a.w.n, x: repWhy(a), from: a.from, ty: a.ty, set: a.set })),
+      xs: P.xs.map(c => repIt(c.w, `${repXs(c)} · ${c.set ? 'اتقفل' : 'متقفلش'}`)),
+      xsAsk: P.xs.map(c => ({ i: c.w.id, n: c.w.n, x: repXs(c), set: c.set })),
+      xd: P.xd.map(d => repIt(d.w, d.x)), xdate: P.xdate || null,
       dup: P.dup.map(d => repIt(d.w, d.rows ? 'مرتين في الشيت: ' + d.rows.map(r => `${r.st}${REP.num(r.hrs) != null ? ' ' + REP.num(r.hrs) + ' ساعة' : ''}`).join(' و') + ' · متقفلش'
         : `${d.f === 'k' ? 'Factor' : 'التارجت'} في الشيت مرتين: ${d.v.map(v => v || 'قراية مباشرة').join(' و')} · متغيرش`)),
       keep: P.keep.map(c => repIt(c.w, 'في البرنامج مسجل إنه اشتغل ' + L.stamp(c.e.e))),
       miss: P.miss.map(r => ({ n: r.n, x: r.st || '' })), absent: P.absent.map(w => repIt(w)) };
   }
   function repPlanNow() {
-    RP.plan = REP.plan({ files: RP.files, wells: WELLS, alias: SEED.alias, dt: S.dt, day: RP.day, L, h: H(), now: Date.now(), today: curDay(), ty: RP.ty || {} });
+    RP.plan = REP.plan({ files: RP.files, wells: WELLS, alias: SEED.alias, dt: S.dt, day: RP.day, L, h: H(), now: Date.now(), today: curDay(), ty: RP.ty || {}, xs: RP.xs || {} });
     RP.rec = repRecord(RP.plan, RP.files);
   }
   async function repRead(list) {
@@ -1317,14 +1321,15 @@
     render();
   }
   const REPS = rp => [['close', rp ? 'هيتقفلوا: واقفين في التقرير وشغالين في البرنامج' : 'اتقفلوا: كانوا واقفين في التقرير', 'dn'], ['tg', rp ? 'هيتحدّث التارجت والفاكتور' : 'اتحدّث التارجت والفاكتور', ''],
-    ['running', 'شغالين في التقرير وواقفين في البرنامج', 'w'], ['hidRun', 'شغالين في التقرير ومخفيين عن الفنيين', 'w'], ['hrs', 'ساعات التشغيل مختلفة', 'w'], ['types', 'النوع مختلف', 'w'], ['dup', 'مكرر في الشيت بحالتين أو رقمين: متعملهوش حاجة', 'w'],
+    ['running', 'شغالين في التقرير وواقفين في البرنامج', 'w'], ['hidRun', 'شغالين في التقرير ومخفيين عن الفنيين', 'w'], ['hrs', 'ساعات التشغيل مختلفة', 'w'], ['types', 'النوع مختلف', 'w'], ['dup', 'مكرر في الشيت بحالتين أو رقمين: متعملهوش حاجة', 'w'], ['xs', 'الإنتاج والهندسية مختلفين: واقف ولا شغال', 'w'], ['xd', 'فروق تانية بين الإنتاج والهندسية', 'w'],
     ['keep', 'واقفين في التقرير ومتقفلوش', 'w'], ['miss', 'في التقرير ومش في البرنامج', ''], ['absent', 'ظاهرين للفنيين ومش في التقرير', '']];
   function repHtml(rec, preview) {
     let h = `<div class="card"><h3 style="margin:0 0 4px">تقرير يوم ${esc(arDay(rec.day))}</h3><p class="mute" style="margin:0">${rec.files.map(esc).join('، ')}${preview ? '' : ` · عمله ${esc(rec.byn || '')} ${esc(L.stamp(rec.t))}`}</p>`;
     if (preview) h += `<label class="lab" style="margin-top:10px">يوم الإنتاج اللي التقرير بيتكلم عنه <em>(تقرير الصبح = اليوم اللي قبله من 6 لـ 6)</em></label><input class="in" type="date" id="rpday" value="${rec.day}" max="${curDay()}">`;
     if (rec.stale) h += `<div class="banner">التقرير ده عن يوم فات عليه أكتر من يوم. الآبار اللي هتتقفل هتبقى واقفة من يومه، ولو فيه بير رجع اشتغل من وقتها، الفني يسجل إنه رجع.</div>`;
-    const cnt = k => (rec[k] || []).length, any = ['running', 'hidRun', 'hrs', 'types', 'keep', 'dup'].some(k => cnt(k));
-    h += `<div class="rchips">${cnt('close') ? `<span class="chip dn"><b>${cnt('close')}</b> ${preview ? 'هيتقفلوا' : 'اتقفلوا'}</span>` : ''}${cnt('tg') ? `<span class="chip"><b>${cnt('tg')}</b> تارجت وفاكتور</span>` : ''}${any ? `<span class="chip w"><b>${['running', 'hidRun', 'hrs', 'types', 'keep', 'dup'].reduce((n, k) => n + cnt(k), 0)}</b> فرق محتاج مراجعة</span>` : '<span class="chip">مفيش فرق في الحالة والساعات</span>'}</div>`;
+    const cnt = k => (rec[k] || []).length, any = ['running', 'hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].some(k => cnt(k));
+    h += `<div class="rchips">${cnt('close') ? `<span class="chip dn"><b>${cnt('close')}</b> ${preview ? 'هيتقفلوا' : 'اتقفلوا'}</span>` : ''}${cnt('tg') ? `<span class="chip"><b>${cnt('tg')}</b> تارجت وفاكتور</span>` : ''}${any ? `<span class="chip w"><b>${['running', 'hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].reduce((n, k) => n + cnt(k), 0)}</b> فرق محتاج مراجعة</span>` : '<span class="chip">مفيش فرق في الحالة والساعات</span>'}</div>`;
+    if (rec.xdate) h += `<div class="banner" style="margin-top:10px">تقرير الهندسية بتاريخ ${esc(rec.xdate.eng)} وتقرير الإنتاج بتاريخ ${esc(rec.xdate.oil)}. مش نفس اليوم، فمقارنتش بينهم.</div>`;
     if (rec.hidStop) h += `<p class="mute" style="margin:8px 0 0">و${rec.hidStop} بير مخفي عن الفنيين واقف في التقرير، دول متقفلوش في البرنامج.</p>`;
     h += preview ? `<div class="btns" style="margin-top:12px"><button class="btn" data-act="repclear">إلغاء</button><button class="btn pen" data-act="repok">${cnt('close') || cnt('tg') ? 'اعتمد' : 'احفظ المقارنة'}</button></div>`
       : `<button class="btn wa wide" style="margin-top:12px" data-act="repshare" data-d="${rec.day}">${ic('share')} ابعت المقارنة</button>`;
@@ -1333,8 +1338,11 @@
       <p class="mute rnote">لحد ما تقول إن النوع اتغير، البرنامج مش هيقفل البير ولا يغيّر أرقامه من الجدول ده.</p>${rec.ask.map(a => `<div class="rask"><div class="nm">${esc(a.n)}<small>${esc(a.x)}</small></div>
       <div class="tg2"><button type="button" class="${a.set ? '' : 'on'}" data-act="rpty" data-w="${esc(a.i)}" data-t="">متغيرش · ${esc(TYPE_AR[a.from] || a.from)}</button>${a.ty ? `<button type="button" class="${a.set ? 'on' : ''}" data-act="rpty" data-w="${esc(a.i)}" data-t="${esc(a.ty)}">اتغير لـ ${esc(TYPE_AR[a.ty] || a.ty)}</button>` : ''}</div>
       ${a.ty ? '' : '<p class="mute" style="margin:6px 0 0">لو اتغير، غيّره من بيانات البير.</p>'}</div>`).join('')}</section>`;
+    if (preview && (rec.xsAsk || []).length) h += `<section class="sec rsec w"><h3>الإنتاج والهندسية مختلفين: واقف ولا شغال؟ <small>${rec.xsAsk.length}</small></h3>
+      <p class="mute rnote">لحد ما تختار "اقفله"، البرنامج مش هيقفل البير.</p>${rec.xsAsk.map(a => `<div class="rask"><div class="nm">${esc(a.n)}<small>${esc(a.x)}</small></div>
+      <div class="tg2"><button type="button" class="${a.set ? '' : 'on'}" data-act="rpxs" data-w="${esc(a.i)}" data-t="">سيبه زي ما هو</button><button type="button" class="${a.set ? 'on' : ''}" data-act="rpxs" data-w="${esc(a.i)}" data-t="close">واقف، اقفله</button></div></div>`).join('')}</section>`;
     for (const [k, title, cls] of REPS(preview)) {
-      if (preview && k === 'types') continue;
+      if (preview && (k === 'types' || k === 'xs')) continue;
       const a = rec[k] || []; if (!a.length) continue;
       h += `<section class="sec rsec ${cls}"><h3>${esc(title)} <small>${a.length}</small></h3>${a.map(x => x.i ? `<button class="wrow" data-act="well" data-w="${esc(x.i)}"><span class="wn">${esc(x.n)}</span><span class="ws">${esc(x.x)}</span><span class="wm"></span></button>` : `<div class="irow"><span class="nm">${esc(x.n)}<small>${esc(x.x)}</small></span></div>`).join('')}</section>`;
     }
@@ -1342,9 +1350,12 @@
   }
   function vRep() {
     let h = top('تحديث من التقارير', 'المهندس والأدمن', 'settings') + '<main class="wrap">';
-    h += `<div class="card"><p style="margin:0 0 6px">اختار تقرير الإنتاج اليومي <bdi dir="ltr">AG OIL REPORT</bdi>، وشيت <bdi dir="ltr">Updated Gas Injection</bdi> لو عندك تحديث. البرنامج:</p>
-      <ul class="rl"><li>يقفّل الآبار الواقفة في التقرير، من أول يوم التقرير، ويفضل البير واقف لحد ما حد يسجل إنه رجع.</li><li>يحدّث تارجت وفاكتور الـ Gas Lift، وتارجت آبار الحقن.</li><li>يقارن التقرير بالبرنامج ويطلعلك كل فرق.</li></ul>
-      <p class="mute" style="margin:0 0 10px">إخفاء البير مش بيحصل لوحده. ده من "بيانات البير".</p>
+    h += `<div class="card"><p style="margin:0 0 6px">اختار ملف أو أكتر مرة واحدة:</p>
+      <ul class="rl"><li><b>تقرير الإنتاج</b> <bdi dir="ltr">AG OIL REPORT</bdi>: منه البرنامج يعرف مين واقف ومين شغال، ويقفّل الواقفين من أول يوم التقرير، ويحدّث تارجت آبار الحقن.</li>
+      <li><b>شيت الجاز ليفت</b> <bdi dir="ltr">Updated Gas Injection</bdi>: منه التارجت والفاكتور بتوع الـ Gas Lift. لو مفيش تقرير إنتاج، بيقفّل الواقفين منه.</li>
+      <li><b>تقرير الهندسية</b> <bdi dir="ltr">WD Dist Eng Activities</bdi>: البرنامج بيقارنه بتقرير الإنتاج (الحالة والساعات والـ Lift gas والآبار اللي على الحفار). اللي مختلف بيسألك عليه، ومش بيقفل حاجة لوحده.</li>
+      <li>وفي الآخر يقارن كله بالبرنامج ويطلعلك كل فرق، ومحدش بيتغير غير لما تدوس "اعتمد".</li></ul>
+      <p class="mute" style="margin:0 0 10px">كل جدول بيأثر على الآبار اللي من نوعه بس. إخفاء البير مش بيحصل لوحده، ده من "بيانات البير".</p>
       <input type="file" id="rpf" accept=".xls,.xlsx,.xlsm,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12" multiple hidden>
       <button class="btn pen wide" data-act="repfile" ${RP && RP.busy ? 'disabled' : ''}>${ic('dl')} ${RP && RP.busy ? 'بيقرا الملفات…' : 'اختار الملفات'}</button></div>`;
     if (RP && RP.err) h += `<div class="banner">${esc(RP.err)}</div>`;
@@ -1360,7 +1371,7 @@
     if (!RP || !RP.plan || !canWells()) return; repPlanNow();
     const P = RP.plan, rec = RP.rec, [s0] = L.dayWindow(P.day, H()), lab = rec.date || P.day;
     for (const a of P.ask) if (a.set) setEdit(a.w.id, 't', a.set);
-    delete rec.ask;
+    delete rec.ask; delete rec.xsAsk;
     for (const { w, r } of P.close) { const e = Object.assign({ id: uid(), w: w.id, s: s0, e: null, r: r.cause || 'SI', o: 'تقرير الإنتاج ' + lab, src: 'rep' }, stampBy()); pushEv(e); audit(w.id, w.n, 'داون تايم', '', 'واقف في تقرير ' + lab, curDay()); }
     for (const c of P.tg) setEdit(c.w.id, c.f, c.b || 0);
     rec.t = Date.now(); S.reps = S.reps || {}; S.reps[P.day] = rec; mark('rp|' + P.day); S.ui.rpSeen = rec.t;
@@ -1369,7 +1380,7 @@
   }
   function repText(rec) {
     const sec = (t, a) => a && a.length ? `\n\n*${t} (${a.length})*\n` + a.map(x => `- ${x.n}${x.x ? ' · ' + x.x : ''}`).join('\n') : '';
-    return `مقارنة تقرير الإنتاج مع AG Survey\nيوم ${rec.day}${rec.date ? ' · تقرير ' + rec.date : ''}` + REPS(false).map(([k, t]) => sec(t, rec[k])).join('') + (rec.hidStop ? `\n\nو${rec.hidStop} بير مخفي واقف في التقرير.` : '');
+    return `مقارنة تقرير الإنتاج مع AG Survey\nيوم ${rec.day}${rec.date ? ' · تقرير ' + rec.date : ''}` + (rec.xdate ? `\n\nتقرير الهندسية (${rec.xdate.eng}) مش نفس يوم تقرير الإنتاج (${rec.xdate.oil})، فمتقارنوش.` : '') + REPS(false).map(([k, t]) => sec(t, rec[k])).join('') + (rec.hidStop ? `\n\nو${rec.hidStop} بير مخفي واقف في التقرير.` : '');
   }
   function repShare(day) {
     const rec = S.reps && S.reps[day]; if (!rec) return; const text = repText(rec);
@@ -1576,6 +1587,7 @@
       case 'repfile': { const i = $('#rpf'); if (i) i.click(); return; }
       case 'repok': return repApply();
       case 'repclear': RP = null; return render();
+      case 'rpxs': { if (!RP || !RP.plan || !canWells()) return; RP.xs = RP.xs || {}; if (b.dataset.t) RP.xs[b.dataset.w] = b.dataset.t; else delete RP.xs[b.dataset.w]; const y = window.scrollY; repPlanNow(); render(); window.scrollTo(0, y); return; }
       case 'rpty': { if (!RP || !RP.plan || !canWells()) return; RP.ty = RP.ty || {}; if (b.dataset.t) RP.ty[b.dataset.w] = b.dataset.t; else delete RP.ty[b.dataset.w]; const y = window.scrollY; repPlanNow(); render(); window.scrollTo(0, y); return; }
       case 'tg2': { const g = b.closest('.tg2'), box = g && g.querySelector('input'); if (!box) return; const v = b.dataset.v === '1';
         g.querySelectorAll('button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
