@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.13';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.14';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -686,11 +686,34 @@
     if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للأدمن بس.</div>`;
     h += staffCard(d) + planSections(ids, d, cp, true) + (canPlan() ? rigHtml() : '');
     const open = WELLS.filter(w => !w.hid).map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
-    const [f0, f1] = L.dayWindow(d, H()), lostAll = canPlan() ? open.reduce((a, { w, e }) => a + (bbl(w, Math.max(e.s, f0), Math.min(f1, now)) || 0), 0) : 0;
-    h += `<section class="sec"><h3>واقف دلوقتي <small>${open.length}${lostAll > 0 ? ' · ضاع النهارده ' + bblTxt(lostAll) : ''}</small></h3>`;
-    h += open.length ? open.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} <span class="tag">${esc(areaOf(w.a).n)}</span></span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(e.s, L.dayWindow(d, H())[0]), now)) + ' النهارده' : ''}</span><span class="wm"></span></button>`).join('') : '<p class="empty">كل الآبار شغالة</p>';
+    const sp = downSplit(open, now);
+    h += `<section class="sec"><h3>واقف دلوقتي <small>${sp.now.length}${downLost(sp.now, d, now)}</small></h3>${downRows(sp.now, d, true, now)}</section>${downCards(sp, '')}`;
     markSeen(d, ids);
-    return h + '</section></main>' + tabs('follow');
+    return h + '</main>' + tabs('follow');
+  }
+  /* the stopped wells: under 24 hours are shown; over 24 hours and the intermittent ones are each behind a card with their
+     count, and open on their own page */
+  const DAY_MS = 864e5;
+  function downSplit(list, now) { const r = { now: [], long: [], int: [] }; for (const x of list) (x.w.int ? r.int : now - x.e.s > DAY_MS ? r.long : r.now).push(x); return r; }
+  function downLost(list, d, now) { if (!canPlan()) return ''; const s0 = L.dayWindow(d, H())[0], v = list.reduce((a, { w, e }) => a + (bbl(w, Math.max(e.s, s0), now) || 0), 0); return v > 0 ? ' · ضاع النهارده ' + bblTxt(v) : ''; }
+  function downRows(list, d, withArea, now, empty) {
+    const s0 = L.dayWindow(d, H())[0];
+    if (!list.length) return `<p class="empty">${empty || 'مفيش آبار واقفة من أقل من 24 ساعة'}</p>`;
+    return list.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} ${withArea ? `<span class="tag">${esc(areaOf(w.a).n)}</span>` : '<span class="tag dn">واقف</span>'}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(e.s, s0), now)) + ' النهارده' : ''}</span><span class="wm"></span></button>`).join('');
+  }
+  const DOWNS = { long: 'واقف من أكتر من 24 ساعة', int: 'الآبار المتقطعة المقفولة' };
+  function downCards(sp, aid) {
+    const card = k => sp[k].length ? `<button class="sec scard dcard" data-act="downs" data-k="${k}"${aid ? ` data-a="${aid}"` : ''}><span class="sch"><b>${DOWNS[k]}</b><small>${sp[k].length}</small><span class="chev">${ic('back')}</span></span></button>` : '';
+    return card('long') + card('int');
+  }
+  function vDowns() {
+    const now = Date.now(), d = viewDay(), aid = V.da || '', k = V.dk === 'int' ? 'int' : 'long';
+    const open = WELLS.filter(w => !w.hid && (!aid || w.a === aid)).map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
+    const list = downSplit(open, now)[k].sort((x, y) => x.e.s - y.e.s);
+    let h = top(DOWNS[k], (aid ? esc(areaOf(aid).n) + ' · ' : '') + dayLine(), 'follow');
+    if (aid) h = h.replace('data-act="go" data-v="follow"', `data-act="area" data-a="${esc(aid)}" data-t="dt"`);
+    h += `<main class="wrap"><section class="sec"><h3>${DOWNS[k]} <small>${list.length}${downLost(list, d, now)}</small></h3>${downRows(list, d, !aid, now, 'مفيش')}</section></main>`;
+    return h + tabs('follow');
   }
   // Rig & Rigless from the newest engineering report (engineers and the admin)
   function rigHtml() {
@@ -719,9 +742,9 @@
     const ws = WELLS.filter(w => w.a === a.id && !w.hid);
     const open = ws.map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
     const today = S.dt.filter(e => WBY[e.w] && WBY[e.w].a === a.id && e.s < e0 && (e.e == null || e.e > s0)).sort((x, y) => y.s - x.s);
-    h += `<section class="sec"><h3>واقف دلوقتي <small>${open.length}</small></h3>`;
-    h += open.length ? open.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} <span class="tag dn">واقف</span></span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(e.s, L.dayWindow(d, H())[0]), now)) + ' النهارده' : ''}</span><span class="wm"></span></button>`).join('') : '<p class="empty">كل الآبار شغالة</p>';
-    h += `</section><section class="sec"><h3>وقفات النهارده <small>${today.length}</small></h3>`;
+    const sp = downSplit(open, now);
+    h += `<section class="sec"><h3>واقف دلوقتي <small>${sp.now.length}${downLost(sp.now, d, now)}</small></h3>${downRows(sp.now, d, false, now)}</section>${downCards(sp, a.id)}`;
+    h += `<section class="sec"><h3>وقفات النهارده <small>${today.length}</small></h3>`;
     h += today.length ? today.map(e => { const w = WBY[e.w]; return `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">${hmA(e.s)} ← ${e.e ? hmA(e.e) : 'لسه واقف'} · ${durTxt((e.e || now) - e.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(e.s, s0), Math.min(e.e || now, e0, now))) : ''}</span><span class="wm"></span></button>`; }).join('') : '<p class="empty">مفيش وقفات النهارده</p>';
     h += `</section><section class="sec"><h3>ساعات التشغيل <small>من ${H()} الصبح لحد دلوقتي</small></h3>`;
     const rows = visibleWells(a.id).map(w => ({ w, u: L.uptime(S.dt, w.id, d, H(), now) })).filter(x => x.u.down > 0);
@@ -1156,7 +1179,10 @@
   }
   const BADTIME = 'الساعة من 1 لـ 12، والدقايق من 0 لـ 59';
   function dayEvents(wid, d) { const [s0, e0] = L.dayWindow(d, H()); return S.dt.filter(e => e.w === wid && e.s < e0 && (e.e == null || e.e > s0)).sort((a, b) => a.s - b.s); }
-  const durTxt = ms => { const m = Math.max(1, Math.round(ms / 60000)); if (m < 60) return m + ' دقيقة'; const h = Math.floor(m / 60), r = m % 60; return (h === 1 ? 'ساعة' : h === 2 ? 'ساعتين' : h + (h <= 10 ? ' ساعات' : ' ساعة')) + (r ? ' و' + r + ' دقيقة' : ''); };
+  const hrsWord = h => h === 1 ? 'ساعة' : h === 2 ? 'ساعتين' : h + (h <= 10 ? ' ساعات' : ' ساعة');
+  const durTxt = ms => { const m = Math.max(1, Math.round(ms / 60000)); if (m < 60) return m + ' دقيقة'; const h = Math.floor(m / 60), r = m % 60;
+    if (h >= 24) { const d = Math.floor(h / 24), rh = h % 24; return (d === 1 ? 'يوم' : d === 2 ? 'يومين' : d + (d <= 10 ? ' أيام' : ' يوم')) + (rh ? ' و' + hrsWord(rh) : ''); }   // a day or more: days and hours
+    return hrsWord(h) + (r ? ' و' + r + ' دقيقة' : ''); };
   const canEditEv = x => editable() && (isAdmin() || canPlan() || (x.by === S.me && L.prodDay(x.s, H()) === curDay()));
   function evBox(id) {
     const x = id ? S.dt.find(e => e.id === id) : null, w = FM.w, rs = L.reasonsFor(w.t, SEED), cur = x ? (rs.includes(x.r) ? x.r : L.OTHER) : '';
@@ -1590,7 +1616,7 @@
     if (isPending(me())) { stopGeo(); WAITING = true; app.innerHTML = vWait(); return; }
     if (!(V.v === 'area' && (V.tab || 'wells') === 'wells' && S.ui.mode === 'map')) stopGeo();
     const v = V.v;
-    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? vFollow() : v === 'staff' ? vStaff() : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && canWells() ? vAdmin() : v === 'rep' && canWells() ? vRep() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
+    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? vFollow() : v === 'staff' ? vStaff() : v === 'downs' ? vDowns() : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && canWells() ? vAdmin() : v === 'rep' && canWells() ? vRep() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
   }
   let WAITING = false; // the waiting screen of a new account was shown
   function go(v, extra) { V = Object.assign({ v }, extra || {}); render(); window.scrollTo(0, 0); }
@@ -1600,7 +1626,8 @@
     const a = b.dataset.act;
     switch (a) {
       case 'go': return go(b.dataset.v, b.dataset.d ? { rpd: b.dataset.d } : null);
-      case 'area': S.ui.lastArea = b.dataset.a; save(); return go('area', { a: b.dataset.a, tab: 'wells' });
+      case 'area': S.ui.lastArea = b.dataset.a; save(); return go('area', { a: b.dataset.a, tab: b.dataset.t || 'wells' });
+      case 'downs': return go('downs', { dk: b.dataset.k, da: b.dataset.a || '' });
       case 'stab': V.tab = b.dataset.v; return render();
       case 'mode': S.ui.mode = b.dataset.v; save(); return render();
       case 'mmeas': if (MAPV) { MAPV.meas = !MAPV.meas; b.classList.toggle('on', MAPV.meas);
@@ -1798,7 +1825,8 @@
   // Android back button
   if (Cap && Cap.App) Cap.App.addListener('backButton', () => { if (!modalEl.hidden) return closeModal(); if (FM) return closeForm();
     if (!me()) { if (V.auth) { V = { v: 'home', lu: V.lu }; return render(); } return Cap.App.exitApp(); }
-    if (V.v !== 'home' && !isPending(me())) return go(['admin', 'audit', 'users', 'rep'].includes(V.v) ? 'settings' : V.v === 'staff' ? 'follow' : 'home'); Cap.App.exitApp(); });
+    if (V.v === 'downs' && V.da) return go('area', { a: V.da, tab: 'dt' });
+    if (V.v !== 'home' && !isPending(me())) return go(['admin', 'audit', 'users', 'rep'].includes(V.v) ? 'settings' : ['staff', 'downs'].includes(V.v) ? 'follow' : 'home'); Cap.App.exitApp(); });
   // a new production day starts while the app is open
   setInterval(() => { if (!FM && modalEl.hidden && me() && !VDAY && document.activeElement === document.body) render(); }, 60000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) { flushForm(); bgStash(); saveNow(); } });
