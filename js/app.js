@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.12';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.13';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -23,7 +23,7 @@
     if (idb) { try { await new Promise((res, rej) => { const t = idb.transaction(STORE, 'readwrite'); t.objectStore(STORE).put(JSON.parse(JSON.stringify(S)), 'state'); t.oncomplete = res; t.onerror = () => rej(t.error); }); return; } catch (e) { } }
     try { localStorage.setItem(DBN, JSON.stringify(S)); } catch (e) { toast('مساحة التخزين خلصت. صدّر الداتا.'); }
   }
-  const fresh = () => ({ v: 1, ui: { mode: 'type' }, plan: {}, errs: [], users: {}, me: null, ucode: {}, ureq: {}, uprof: {}, reps: {}, cfg: { prodDayStart: SEED.prodDayStart, dieselMin: SEED.dieselMin, gasDiffPct: SEED.gasDiffPct, edits: {}, newWells: {}, chemMin: {} }, days: {}, dt: [], samples: [], audit: [], jobs: {}, gone: {} });
+  const fresh = () => ({ v: 1, ui: { mode: 'type' }, plan: {}, errs: [], users: {}, me: null, ucode: {}, ureq: {}, uprof: {}, reps: {}, tests: {}, eng: {}, cfg: { prodDayStart: SEED.prodDayStart, dieselMin: SEED.dieselMin, gasDiffPct: SEED.gasDiffPct, edits: {}, newWells: {}, chemMin: {} }, days: {}, dt: [], samples: [], audit: [], jobs: {}, gone: {} });
   let S = fresh();
 
   // ---------------- config ----------------
@@ -684,12 +684,33 @@
     const d = viewDay(), cp = canPlan() && editable(), ids = SEED.areas.map(a => a.id), now = Date.now();
     let h = top('المتابعة', dayLine()) + '<main class="wrap">';
     if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للأدمن بس.</div>`;
-    h += staffCard(d) + planSections(ids, d, cp, true);
+    h += staffCard(d) + planSections(ids, d, cp, true) + (canPlan() ? rigHtml() : '');
     const open = WELLS.filter(w => !w.hid).map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
-    h += `<section class="sec"><h3>واقف دلوقتي <small>${open.length}</small></h3>`;
-    h += open.length ? open.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} <span class="tag">${esc(areaOf(w.a).n)}</span></span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}</span><span class="wm"></span></button>`).join('') : '<p class="empty">كل الآبار شغالة</p>';
+    const [f0, f1] = L.dayWindow(d, H()), lostAll = canPlan() ? open.reduce((a, { w, e }) => a + (bbl(w, Math.max(e.s, f0), Math.min(f1, now)) || 0), 0) : 0;
+    h += `<section class="sec"><h3>واقف دلوقتي <small>${open.length}${lostAll > 0 ? ' · ضاع النهارده ' + bblTxt(lostAll) : ''}</small></h3>`;
+    h += open.length ? open.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} <span class="tag">${esc(areaOf(w.a).n)}</span></span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(e.s, L.dayWindow(d, H())[0]), now)) + ' النهارده' : ''}</span><span class="wm"></span></button>`).join('') : '<p class="empty">كل الآبار شغالة</p>';
     markSeen(d, ids);
     return h + '</section></main>' + tabs('follow');
+  }
+  // Rig & Rigless from the newest engineering report (engineers and the admin)
+  function rigHtml() {
+    const days = Object.keys(S.eng || {}).sort(), E = days.length ? S.eng[days[days.length - 1]] : null;
+    const wl = (n, i) => i && WBY[i] ? `<button class="rgw" data-act="well" data-w="${esc(i)}">${esc(n)}</button>` : `<span class="rgw0">${esc(n)}</span>`;
+    const en = (v, cls) => `<span class="${cls || ''}" dir="auto">${esc(v)}</span>`;   // the report's English text keeps its own direction
+    const tx = (lab, v) => v ? `<div class="rgt"><b>${lab}</b>${en(v, 'rgx')}</div>` : '';
+    const plan = v => v ? `<details class="rgd"><summary>الخطة</summary>${en(v, 'rgx')}</details>` : '';
+    let h = `<section class="sec plan rig"><h3>Rig & Rigless <small>${E ? 'تقرير الهندسية ' + esc(arDay(E.d)) : ''}</small></h3>`;
+    if (!E) return h + `<p class="empty">لسه مفيش تقرير هندسية. ارفعه من الإعدادات ← تحديث من التقارير.</p></section>`;
+    h += `<p class="rgk">Work Over <small>${E.wo.length}</small></p>`;
+    h += E.wo.map(x => `<div class="rgi"><div class="rgh"><span class="rgr">${esc(x.rig)}</span>${wl(x.n, x.i)}</div>
+      ${x.job ? `<div class="rgj">${en(x.job)}</div>` : ''}${tx('النهارده', x.op)}${plan(x.plan)}
+      <p class="rgm">${x.rel ? 'التسليم المتوقع ' + esc(arDay(x.rel)) : ''}${x.fm || x.pfm ? ` · FM <bdi dir="ltr">${esc(x.fm || '—')} → ${esc(x.pfm || '—')}</bdi>` : ''}${x.gain ? ` · زيادة متوقعة ${esc(String(x.gain))} برميل` : ''}</p>
+      ${x.next.length ? `<div class="rgt"><b>الآبار الجاية</b><ul class="rgn">${x.next.map(y => `<li>${wl(y.n, y.i)}${y.job ? en(y.job, 'rgx') : ''}</li>`).join('')}</ul></div>` : ''}</div>`).join('') || '<p class="empty">مفيش</p>';
+    if (E.drill.length) h += `<p class="rgk">Drilling <small>${E.drill.length}</small></p>` + E.drill.map(x => `<div class="rgi"><div class="rgh"><span class="rgr">${esc(x.rig)}</span>${en(x.well || '', 'rgw0')}</div>${tx('النهارده', x.done)}</div>`).join('')
+      + (E.dnext.length ? `<div class="rgi"><div class="rgt"><b>الآبار الجاية للحفر</b><ul class="rgn">${E.dnext.map(v => `<li>${en(v, 'rgx')}</li>`).join('')}</ul></div></div>` : '');
+    if (E.rigless.length) h += `<p class="rgk">Rigless <small>${E.rigless.length}</small></p>` + E.rigless.map(x => `<div class="rgi"><div class="rgh">${x.ws.map(y => wl(y.n, y.i)).join('<span class="mute">·</span>')}</div>
+      ${x.job || x.what ? `<div class="rgj">${en(x.job || x.what)}</div>` : ''}${tx('الشغل', x.op)}${plan(x.plan)}</div>`).join('');
+    return h + '</section>';
   }
   function areaDown(a, d) {
     const now = Date.now(), [s0, e0] = L.dayWindow(d, H()), cp = canPlan() && editable(), cs = canStaff() && editable();
@@ -699,9 +720,9 @@
     const open = ws.map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
     const today = S.dt.filter(e => WBY[e.w] && WBY[e.w].a === a.id && e.s < e0 && (e.e == null || e.e > s0)).sort((x, y) => y.s - x.s);
     h += `<section class="sec"><h3>واقف دلوقتي <small>${open.length}</small></h3>`;
-    h += open.length ? open.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} <span class="tag dn">واقف</span></span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}</span><span class="wm"></span></button>`).join('') : '<p class="empty">كل الآبار شغالة</p>';
+    h += open.length ? open.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} <span class="tag dn">واقف</span></span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(e.s, L.dayWindow(d, H())[0]), now)) + ' النهارده' : ''}</span><span class="wm"></span></button>`).join('') : '<p class="empty">كل الآبار شغالة</p>';
     h += `</section><section class="sec"><h3>وقفات النهارده <small>${today.length}</small></h3>`;
-    h += today.length ? today.map(e => { const w = WBY[e.w]; return `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">${hmA(e.s)} ← ${e.e ? hmA(e.e) : 'لسه واقف'} · ${durTxt((e.e || now) - e.s)}</span><span class="wm"></span></button>`; }).join('') : '<p class="empty">مفيش وقفات النهارده</p>';
+    h += today.length ? today.map(e => { const w = WBY[e.w]; return `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">${hmA(e.s)} ← ${e.e ? hmA(e.e) : 'لسه واقف'} · ${durTxt((e.e || now) - e.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(e.s, s0), Math.min(e.e || now, e0, now))) : ''}</span><span class="wm"></span></button>`; }).join('') : '<p class="empty">مفيش وقفات النهارده</p>';
     h += `</section><section class="sec"><h3>ساعات التشغيل <small>من ${H()} الصبح لحد دلوقتي</small></h3>`;
     const rows = visibleWells(a.id).map(w => ({ w, u: L.uptime(S.dt, w.id, d, H(), now) })).filter(x => x.u.down > 0);
     h += rows.length ? rows.map(({ w, u }) => `<div class="irow"><span class="nm">${esc(w.n)}<small>شغال ${u.up} من ${u.span} ساعة</small></span></div>`).join('') : '<p class="empty">كل الآبار شغالة طول الوقت لحد دلوقتي</p>';
@@ -990,6 +1011,19 @@
     for (const x of T) h += `<div class="job"><span class="jt">${esc(x.x)}${by(x)}</span>${x.done ? '<span class="mute">اتعملت</span>' : ''}</div>`;
     return h + '</div>';
   }
+  // the well's oil a day from its newest test (engineers and the admin), and the barrels a stop costs: hours × BOPD / 24
+  const testOf = w => (canPlan() && S.tests && S.tests[w.id] && S.tests[w.id].bopd > 0) ? S.tests[w.id] : null;
+  const bbl = (w, s0, e0) => { const t = testOf(w); return t ? Math.max(0, e0 - s0) / 3600000 * t.bopd / 24 : null; };
+  const bblTxt = v => v == null ? '' : (v < 10 ? Math.round(v * 10) / 10 : Math.round(v)) + ' برميل';
+  const SRC_AR = { eng: 'تقرير الهندسية', prod: 'تقرير الإنتاج' };
+  function prodHtml(w, d) {
+    const t = testOf(w); if (!t) return '';
+    const n = v => v == null ? '—' : String(Math.round(v * 100) / 100), [s0, e0] = L.dayWindow(d, H()), now = Date.now(), end = Math.min(e0, now);
+    const lost = dayEvents(w.id, d).reduce((a, x) => a + bbl(w, Math.max(x.s, s0), Math.min(x.e || now, end)), 0), rp = S.reps && S.reps[d] && S.reps[d].defm && S.reps[d].defm[w.id];
+    return `<div class="prod"><div class="prh"><span><b>${n(t.bopd)}</b> برميل زيت في اليوم</span><small>آخر تست ${esc(t.d)} · ${esc(SRC_AR[t.src] || '')}</small></div>
+      <div class="prs">BFPD ${n(t.bfpd)} · W.C ${n(t.wc)}% · غاز ${n(t.gas)} MMSCFD</div>
+      <div class="prs">كل ساعة وقوف = <b>${bblTxt(t.bopd / 24)}</b>${lost > 0 ? ` · ضاع النهارده <b>${bblTxt(lost)}</b>` : ''}${rp ? ` · تقرير الإنتاج: ${bblTxt(rp)}` : ''}</div></div>`;
+  }
   function statusHtml(w, ro) {
     const e = L.openEvent(S.dt, w.id), d = viewDay(), evs = dayEvents(w.id, d), [s0, e0] = L.dayWindow(d, H()), now = Date.now();
     let h = jobsHtml(w, d, e, evs, ro);
@@ -998,10 +1032,10 @@
     else h += `<div class="stbox"><div class="stq"><span class="stl">البير شغال؟</span>${ro ? '<span class="mute">أيوه</span>' : `<div class="seg qseg"><button class="on" type="button" disabled>أيوه</button>${w.int ? '<button type="button" data-act="intclose">اتقفل PBU</button>' : ''}<button type="button" class="no" data-act="down">لأ، واقف</button></div>`}</div>`;
     if (evs.length) {
       const dm = L.downMs(S.dt, w.id, s0, Math.min(e0, now)), span = Math.min(e0, now) - s0;
-      h += `<div class="evs"><p class="evh">النهارده وقف <b>${durTxt(dm)}</b> · اشتغل ${durTxt(Math.max(0, span - dm))}</p>${evs.map(x => `<div class="ev"><span class="evt">${esc(x.r)}${x.o ? ' · ' + esc(x.o) : ''}<small>${hmA(x.s)} ← ${x.e ? hmA(x.e) : 'لسه واقف'} · ${durTxt((x.e || now) - x.s)}${x.byn ? ' · ' + esc(x.byn) : ''}</small></span>${canEditEv(x) ? `<button class="ib3" data-act="evedit" data-e="${x.id}" aria-label="تعديل">✎</button>` : ''}</div>`).join('')}</div>`;
+      h += `<div class="evs"><p class="evh">النهارده وقف <b>${durTxt(dm)}</b> · اشتغل ${durTxt(Math.max(0, span - dm))}</p>${evs.map(x => `<div class="ev"><span class="evt">${esc(x.r)}${x.o ? ' · ' + esc(x.o) : ''}<small>${hmA(x.s)} ← ${x.e ? hmA(x.e) : 'لسه واقف'} · ${durTxt((x.e || now) - x.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(x.s, s0), Math.min(x.e || now, e0, now))) : ''}${x.byn ? ' · ' + esc(x.byn) : ''}</small></span>${canEditEv(x) ? `<button class="ib3" data-act="evedit" data-e="${x.id}" aria-label="تعديل">✎</button>` : ''}</div>`).join('')}</div>`;
     }
     if (!ro && !e) h += `<button class="linkbtn" data-act="evadd">+ سجّل وقفة حصلت وخلصت</button>`;
-    return h + '</div>';
+    return h + '</div>' + prodHtml(w, d);
   }
   // chemicals: tank level %, when it was filled, drums on the well, consumption a day (litres)
   const CHP = { v: '%', f: 'وقت التفويل', dr: 'عدد البراميل', rt: 'معدل الاستهلاك' };
@@ -1298,7 +1332,7 @@
       ask: P.ask.map(a => ({ i: a.w.id, n: a.w.n, x: repWhy(a), from: a.from, ty: a.ty, set: a.set })),
       xs: P.xs.map(c => repIt(c.w, `${repXs(c)} · ${c.set ? 'اتقفل' : 'متقفلش'}`)),
       xsAsk: P.xs.map(c => ({ i: c.w.id, n: c.w.n, x: repXs(c), set: c.set })),
-      xd: P.xd.map(d => repIt(d.w, d.x)), xdate: P.xdate || null,
+      xd: P.xd.map(d => repIt(d.w, d.x)), xdate: P.xdate || null, nt: P.tests.length, defm: P.defm, eng: P.eng ? P.eng.d : null,
       dup: P.dup.map(d => repIt(d.w, d.rows ? 'مرتين في الشيت: ' + d.rows.map(r => `${r.st}${REP.num(r.hrs) != null ? ' ' + REP.num(r.hrs) + ' ساعة' : ''}`).join(' و') + ' · متقفلش'
         : `${d.f === 'k' ? 'Factor' : 'التارجت'} في الشيت مرتين: ${d.v.map(v => v || 'قراية مباشرة').join(' و')} · متغيرش`)),
       keep: P.keep.map(c => repIt(c.w, 'في البرنامج مسجل إنه اشتغل ' + L.stamp(c.e.e))),
@@ -1328,10 +1362,10 @@
     if (preview) h += `<label class="lab" style="margin-top:10px">يوم الإنتاج اللي التقرير بيتكلم عنه <em>(تقرير الصبح = اليوم اللي قبله من 6 لـ 6)</em></label><input class="in" type="date" id="rpday" value="${rec.day}" max="${curDay()}">`;
     if (rec.stale) h += `<div class="banner">التقرير ده عن يوم فات عليه أكتر من يوم. الآبار اللي هتتقفل هتبقى واقفة من يومه، ولو فيه بير رجع اشتغل من وقتها، الفني يسجل إنه رجع.</div>`;
     const cnt = k => (rec[k] || []).length, any = ['running', 'hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].some(k => cnt(k));
-    h += `<div class="rchips">${cnt('close') ? `<span class="chip dn"><b>${cnt('close')}</b> ${preview ? 'هيتقفلوا' : 'اتقفلوا'}</span>` : ''}${cnt('tg') ? `<span class="chip"><b>${cnt('tg')}</b> تارجت وفاكتور</span>` : ''}${any ? `<span class="chip w"><b>${['running', 'hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].reduce((n, k) => n + cnt(k), 0)}</b> فرق محتاج مراجعة</span>` : '<span class="chip">مفيش فرق في الحالة والساعات</span>'}</div>`;
+    h += `<div class="rchips">${cnt('close') ? `<span class="chip dn"><b>${cnt('close')}</b> ${preview ? 'هيتقفلوا' : 'اتقفلوا'}</span>` : ''}${cnt('tg') ? `<span class="chip"><b>${cnt('tg')}</b> تارجت وفاكتور</span>` : ''}${rec.nt ? `<span class="chip"><b>${rec.nt}</b> تست ${preview ? 'هيتحدّث' : 'اتحدّث'}</span>` : ''}${rec.eng ? `<span class="chip">Rig & Rigless ${esc(rec.eng.slice(5))}</span>` : ''}${any ? `<span class="chip w"><b>${['running', 'hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].reduce((n, k) => n + cnt(k), 0)}</b> فرق محتاج مراجعة</span>` : '<span class="chip">مفيش فرق في الحالة والساعات</span>'}</div>`;
     if (rec.xdate) h += `<div class="banner" style="margin-top:10px">تقرير الهندسية بتاريخ ${esc(rec.xdate.eng)} وتقرير الإنتاج بتاريخ ${esc(rec.xdate.oil)}. مش نفس اليوم، فمقارنتش بينهم.</div>`;
     if (rec.hidStop) h += `<p class="mute" style="margin:8px 0 0">و${rec.hidStop} بير مخفي عن الفنيين واقف في التقرير، دول متقفلوش في البرنامج.</p>`;
-    h += preview ? `<div class="btns" style="margin-top:12px"><button class="btn" data-act="repclear">إلغاء</button><button class="btn pen" data-act="repok">${cnt('close') || cnt('tg') ? 'اعتمد' : 'احفظ المقارنة'}</button></div>`
+    h += preview ? `<div class="btns" style="margin-top:12px"><button class="btn" data-act="repclear">إلغاء</button><button class="btn pen" data-act="repok">${cnt('close') || cnt('tg') || rec.nt || rec.eng ? 'اعتمد' : 'احفظ المقارنة'}</button></div>`
       : `<button class="btn wa wide" style="margin-top:12px" data-act="repshare" data-d="${rec.day}">${ic('share')} ابعت المقارنة</button>`;
     h += '</div>';
     if (preview && (rec.ask || []).length) h += `<section class="sec rsec w"><h3>نوعه في الشيت غير البرنامج: اتغير؟ <small>${rec.ask.length}</small></h3>
@@ -1372,6 +1406,9 @@
     const P = RP.plan, rec = RP.rec, [s0] = L.dayWindow(P.day, H()), lab = rec.date || P.day;
     for (const a of P.ask) if (a.set) setEdit(a.w.id, 't', a.set);
     delete rec.ask; delete rec.xsAsk;
+    const by = { by: S.me, byn: (me() || {}).name || '', t: Date.now() };
+    S.tests = S.tests || {}; for (const x of P.tests) { S.tests[x.w.id] = Object.assign({ d: x.d, bopd: x.bopd, bfpd: x.bfpd, wc: x.wc, gas: x.gas, src: x.src, day: P.day }, by); mark('wt|' + x.w.id); }
+    if (P.eng) { S.eng = S.eng || {}; S.eng[P.eng.d] = Object.assign({}, P.eng, by); mark('en|' + P.eng.d); for (const k of Object.keys(S.eng).sort().slice(0, -30)) delete S.eng[k]; }
     for (const { w, r } of P.close) { const e = Object.assign({ id: uid(), w: w.id, s: s0, e: null, r: r.cause || 'SI', o: 'تقرير الإنتاج ' + lab, src: 'rep' }, stampBy()); pushEv(e); audit(w.id, w.n, 'داون تايم', '', 'واقف في تقرير ' + lab, curDay()); }
     for (const c of P.tg) setEdit(c.w.id, c.f, c.b || 0);
     rec.t = Date.now(); S.reps = S.reps || {}; S.reps[P.day] = rec; mark('rp|' + P.day); S.ui.rpSeen = rec.t;
@@ -1800,6 +1837,7 @@
     if (p === 'r') { const w = WBY[b] && L.wAt(WBY[b], d); if (w) { o._n = w.n; o._a = an(w.a); o._ty = w.t; if (w.t === 'GL' && w.k > 0) { const q = L.gasValue(w, d.v); if (q != null) o._q = Math.round(q * 1000) / 1000; } } }
     if (p === 'c') { const w = WBY[b]; if (w) { o._n = w.n; o._a = an(w.a); o._ty = w.t; } }
     if (p === 'nw') { o._a = an(d.a); }
+    if (p === 'wt') { const w = WBY[a]; if (w) { o._n = w.n; o._a = an(w.a); } }
     if (p === 'd') { const t = TANKS.find(x => x.id === b); if (t) { o._place = t.place; o._code = t.code; o._cap = t.cap; o._a = an(t.a); } }
     if (p === 'p') { const x = SEED.points.find(q => q.id === b); if (x) { o._n = x.n; o._a = an(x.a); } }
     if (p === 'e') { const w = WBY[d.w]; if (w) { o._n = w.n; o._a = an(w.a); } o._av = L.avocet(d.r); }

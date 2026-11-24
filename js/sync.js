@@ -32,6 +32,8 @@
     if (p === 'pj') { const L = s.jobs && s.jobs[a]; if (!L) return null; const i = findFromEnd(L, b); return i < 0 ? null : clone(L[i]); }
     if (p === 'a') { const i = findFromEnd(s.audit, a); return i < 0 ? null : clone(s.audit[i]); }
     if (p === 'rp') return s.reps && s.reps[a] ? clone(s.reps[a]) : null;   // a comparison with the daily report
+    if (p === 'wt') return s.tests && s.tests[a] ? clone(s.tests[a]) : null;   // a well's newest test (from the reports)
+    if (p === 'en') return s.eng && s.eng[a] ? clone(s.eng[a]) : null;       // Rig & Rigless of an engineering report
     return null;
   }
   // a record written by a person who was removed (their old phone): keep the values, drop the name
@@ -59,6 +61,8 @@
     if (p === 'pj') { s.jobs = s.jobs || {}; return upsert(s.jobs[a] || (s.jobs[a] = []), b); }
     if (p === 'a') return upsert(s.audit, a);
     if (p === 'rp') { s.reps = s.reps || {}; if (d) s.reps[a] = d; else delete s.reps[a]; }
+    if (p === 'wt') { s.tests = s.tests || {}; if (d) s.tests[a] = d; else delete s.tests[a]; }
+    if (p === 'en') { s.eng = s.eng || {}; if (d) s.eng[a] = d; else delete s.eng[a]; }
   }
 
   // force: keep the time for an audit record too (a rewritten audit must not be undone by an older copy)
@@ -83,6 +87,8 @@
     for (const p in UMAP) for (const u in s[UMAP[p]] || {}) put(p + '|' + u, s[UMAP[p]][u].t);
     for (const h in s.gone || {}) put('ux|' + h);
     for (const d in s.reps || {}) put('rp|' + d, s.reps[d].t);
+    for (const id in s.tests || {}) put('wt|' + id, s.tests[id].t);
+    for (const d in s.eng || {}) put('en|' + d, s.eng[d].t);
     for (const x of s.audit) { if (!x.id) x.id = 'a' + x.ts.toString(36) + Math.random().toString(36).slice(2, 6); put('a|' + x.id, x.ts); }
   }
   // first link (or the sheet was emptied): send everything on this phone
@@ -163,7 +169,7 @@
   // forget modification times of old days (only recent days can still be edited)
   function prune() {
     const y = st(), cut = C.cutDay(); if (!cut) return;
-    for (const k in y.mt) { const p = k.split('|'); if ((DAY_KEYS[p[0]] || p[0] === 'ps' || p[0] === 'pj' || p[0] === 'rp' || PLAN[p[0]]) && p[1] < cut && !y.dirty[k]) delete y.mt[k]; }
+    for (const k in y.mt) { const p = k.split('|'); if ((DAY_KEYS[p[0]] || p[0] === 'ps' || p[0] === 'pj' || p[0] === 'rp' || p[0] === 'en' || PLAN[p[0]]) && p[1] < cut && !y.dirty[k]) delete y.mt[k]; }
   }
   function status() { const y = st() || {}; return { linked: !!url(), pending: Object.keys(y.dirty || {}).length, last: y.last || 0, err: y.err || '', net: !!y.net, running }; }
 

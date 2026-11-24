@@ -431,3 +431,35 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .rask .tg2{display:flex;width:100%}
 .rask .tg2 button{flex:1 1 0}
 .rnote{margin:8px 12px}
+/* the well's production (engineers): newest test, barrels an hour of stop costs */
+.prod{margin-top:10px;padding:10px 12px;border:1px solid var(--rule);border-radius:13px;background:var(--paper)}
+.prh{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:2px 8px;font-size:14px}
+.prh b{font-size:22px;font-variant-numeric:tabular-nums;color:var(--pen)}
+.prh small{color:var(--mute);font-size:12px}
+.prs{font-size:13px;color:var(--mute);margin-top:4px;line-height:1.5}
+.prs b{color:var(--ink)}
+/* Rig & Rigless (engineers) */
+.rig .rgk{margin:0;padding:8px 12px 4px;font-weight:800;font-size:13px;color:var(--pen);letter-spacing:.2px}
+.rig .rgk small{color:var(--mute);font-weight:600}
+.rgi{padding:8px 12px 10px;border-top:1px solid var(--rule)}
+.rgh{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:4px}
+.rgr{font-weight:800;font-size:14px;direction:ltr;unicode-bidi:isolate;background:var(--well-head,var(--bg));border:1px solid var(--rule);border-radius:7px;padding:1px 7px}
+.rgw,.rgw0{font:inherit;font-weight:750;font-size:15px;direction:ltr;unicode-bidi:isolate;background:none;border:0;padding:0;color:var(--ink)}
+.rgw{color:var(--pen);text-decoration:underline;text-underline-offset:3px;cursor:pointer;min-height:32px}
+.rgt,.rgm{margin:2px 0;font-size:13px;line-height:1.55;overflow-wrap:anywhere}
+.rgt b{color:var(--mute);font-weight:700}
+.rgm{color:var(--mute)}
+.rgm small{font-size:11.5px}
+.rgd{margin:2px 0;font-size:13px}
+.rgd summary{color:var(--pen);font-weight:700;cursor:pointer;min-height:28px}
+.rgd p{margin:4px 0 0;line-height:1.55;overflow-wrap:anywhere;color:var(--ink)}
+.rgx{display:block;font-size:13px;line-height:1.55;overflow-wrap:anywhere;color:var(--ink);text-align:start;unicode-bidi:plaintext}
+.rgt{margin:4px 0}
+.rgt>b{display:block;font-size:12px;color:var(--mute);font-weight:700}
+.rgj{margin:2px 0 4px}
+.rgj span{display:inline-block;font-size:12px;font-weight:700;color:var(--pen);background:var(--pen2,var(--bg));border-radius:7px;padding:2px 8px;line-height:1.45;max-width:100%;overflow-wrap:anywhere;unicode-bidi:plaintext}
+.rgn{list-style:none;margin:2px 0 0;padding:0}
+.rgn li{padding:3px 0;border-top:1px dashed var(--rule)}
+.rgn li:first-child{border-top:0}
+.rgn .rgx{font-size:12px;color:var(--mute)}
+.rgd .rgx{margin-top:4px}
