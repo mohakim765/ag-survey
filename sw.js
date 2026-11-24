@@ -1,5 +1,5 @@
 /* AG Survey web: keep every file of the app so it opens with no network. A new build has a new cache name. */
-const V = 'ags-f7ccd56130', FILES = ["./", "css/AG_Survey_Field.css", "css/app.css", "img/icon-180.png", "img/icon-192.png", "img/icon-512.png", "img/icon-maskable-512.png", "img/icon.webp", "index.html", "js/app.js", "js/boot.js", "js/lib.js", "js/pdf.js", "js/rep.js", "js/sync.js", "js/xl.js", "js/xlsx.js", "manifest.webmanifest"];
+const V = 'ags-52e531d0fa', FILES = ["./", "css/AG_Survey_Field.css", "css/app.css", "img/icon-180.png", "img/icon-192.png", "img/icon-512.png", "img/icon-maskable-512.png", "img/icon.webp", "index.html", "js/app.js", "js/boot.js", "js/lib.js", "js/pdf.js", "js/rep.js", "js/sync.js", "js/xl.js", "js/xlsx.js", "manifest.webmanifest"];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith('ags-') && k !== V).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

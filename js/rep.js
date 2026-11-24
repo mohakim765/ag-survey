@@ -64,6 +64,7 @@
     const out = [];
     for (const sh of sheets) {
       if (sh.hidden || !/updated\s*well\s*test|gas\s*wells|apollonia/i.test(sh.name)) continue;
+      const gasTab = /gas\s*wells|apollonia/i.test(sh.name);
       const rows = [...sh.cells.keys()].sort((a, b) => a - b), hr = rows.find(r => r <= 6 && /^(open\s*)?wells?$/i.test(txt(String((sh.cells.get(r) || new Map()).get(1) || ''))));
       if (!hr) continue;
       const map = {}; for (const [c, v] of sh.cells.get(hr)) { const t = txt(String(v)).toLowerCase(); for (const [k, re] of TCOL) if (!(k in map) && re.test(t)) map[k] = c; }
@@ -72,6 +73,10 @@
         if (!n || !isWell(n) || /total|field/i.test(n)) continue;
         const o = { n, sheet: sh.name.trim(), row: r }; for (const k in map) { const v = m.get(map[k]); if (v !== undefined && v !== '') o[k] = typeof v === 'string' ? txt(v) : v; }
         if (typeof o.d === 'number' && o.d > 30000 && o.d < 80000) o.d = serialDay(o.d); else delete o.d;
+        if (gasTab) {   // a gas well: today's status is in column 39 (no title); without it, the hours of the day say it
+          o.gt = 1; const c39 = m.get(39);
+          if (o.stT == null || o.stT === '') { const h = num(o.hrs); if (typeof c39 === 'string' && c39.trim()) o.stT = txt(c39); else if (h != null) o.stT = h > 0 ? 'G.W' : 'S.I'; }
+        }
         out.push(o);
       }
     }
@@ -185,24 +190,32 @@
     o.files.forEach((f, i) => f.rows.forEach(r => { r.fk = f.kind; r.fi = i; }));
     const hasSt = r => r.cols.includes('st') && r.cols.includes('hrs');
     // the wells on the work-over rigs count as stopped rows of the engineering report
-    const engRows = f => (f.tst || []).filter(t => t.stT != null && t.stT !== '').map(t => ({ n: t.n, st: t.stT, hrs: num(t.hrs) == null ? 0 : num(t.hrs), cause: '', sheet: t.sheet, row: t.row, cols: ['st', 'hrs'], fk: 'eng', fi: o.files.indexOf(f) }));
+    const engRows = f => (f.tst || []).filter(t => t.stT != null && t.stT !== '').map(t => ({ n: t.n, st: t.stT, hrs: num(t.hrs) == null ? 0 : num(t.hrs), cause: '', sheet: t.sheet, row: t.row, cols: ['st', 'hrs'], fk: 'eng', gt: t.gt, fi: o.files.indexOf(f) }));
     const rowsOf = f => (f.kind === 'eng' ? engRows(f) : f.rows).concat((f.rig || []).map(g => ({ n: g.n, st: 'W.O', hrs: 0, cause: 'Workover ' + g.rig, sheet: 'Work Over', row: 'rig' + g.row, cols: ['st', 'hrs', 'cause'], rig: g.rig, fk: f.kind, fi: o.files.indexOf(f) })));
     // status: the production report; without it, any file with a status and hours (the engineering report, the Gas Lift sheet)
     const oil = o.files.filter(f => f.kind === 'oil'), engs = o.files.filter(f => f.kind === 'eng');
     const src = oil.length ? oil : o.files.filter(f => (f.rig || []).length || f.rows.some(hasSt));
+    /* gas wells (NF wells in the engineering report's "Gas Wells" / "APOLLONIA" tabs): the production report is an oil report
+       and writes them SI; their status comes from the engineering report only. Without it, the list kept from the last one. */
+    const gasNow = new Set(); for (const f of engs) for (const t of f.tst || []) if (t.gt) { const w = mt(t.n); if (w && (w.t0 || w.t) === 'NF') gasNow.add(w.id); }
+    const G = gasNow.size ? gasNow : new Set(o.gasw || []);
+    const oD0 = oil.map(f => f.date).filter(Boolean).sort().pop(), eD0 = engs.map(f => f.date).filter(Boolean).sort().pop(), sameDay = !(oD0 && eD0 && oD0 !== eD0);
     // every row of each well (a table read twice through two headers on one line is one row)
-    const group = (files, miss) => {
+    const group = (files, miss, onlyGas) => {
       const by = new Map();
       for (const f of files) for (const r of rowsOf(f)) {
         if (!hasSt(r)) continue; const w = mt(r.n);
         if (!w) { if (miss && !miss.some(x => key(x.n) === key(r.n))) miss.push(r); continue; }
+        if (G.has(w.id) ? !(r.fk === 'eng' && (r.gt || r.rig)) : onlyGas) continue;   // gas wells: only the engineering report's gas tabs (and its rigs)
         const g = by.get(w.id) || by.set(w.id, { w, rows: [] }).get(w.id);
         if (!g.rows.some(x => x.fi === r.fi && x.sheet === r.sheet && x.row === r.row)) g.rows.push(r);
       }
       return by;
     };
     const miss = [], by = group(src, miss);
-    const P = { day: o.day, stale, ask: [], dup: [], xs: [], xd: [], xdate: null, tests: [], defm: {}, eng: null, close: [], keep: [], running: [], hidRun: [], hrs: [], tg: [], miss, absent: [], hidStop: 0, nSt: by.size };
+    let gasSkip = 0; if (!(oil.length && engs.length && sameDay)) for (const f of oil) for (const r of f.rows) { const w = hasSt(r) && mt(r.n); if (w && G.has(w.id) && STOP.test(stOf(r))) gasSkip++; }
+    if (oil.length && engs.length && sameDay) for (const [id, g] of group(engs, null, true)) by.set(id, g);   // the gas wells' status, from the engineering report
+    const P = { day: o.day, stale, ask: [], dup: [], xs: [], xd: [], xdate: null, tests: [], defm: {}, eng: null, gasSkip, gas: G.size, close: [], keep: [], running: [], hidRun: [], hrs: [], tg: [], miss, absent: [], hidStop: 0, nSt: by.size };
     const st = new Map();
     for (const { w, rows } of by.values()) {
       const t0 = w.t0 || w.t, set = ty[w.id] && ty[w.id] !== t0 ? ty[w.id] : null, fit0 = rows.filter(r => fitsT(t0, r));
@@ -223,7 +236,7 @@
     else if (oil.length && engs.length) {
       const elg = new Map(); for (const f of engs) for (const r of f.rows) if (r.cols.includes('lg')) { const w = mt(r.n); if (w && !elg.has(w.id)) elg.set(w.id, num(r.lg)); }
       for (const { w, rows } of group(engs, null).values()) {
-        if (w.hid) continue;
+        if (w.hid || G.has(w.id)) continue;
         const re = rows.find(r => r.rig) || rows.find(r => fitsT(w.t, r)); if (!re) continue;
         const u = st.get(w.id), rp = u ? u.r : null;
         if (!rp && by.has(w.id)) continue;   // in the production report, but its rows wait for a question
@@ -259,7 +272,7 @@
       const c = tOf(w); if (!c.eng || t.d > c.eng.d) c.eng = { d: t.d, bopd: num(t.bopd), bfpd: num(t.bfpd), wc: num(t.wc), gas: num(t.gas), src: 'eng' };
     }
     for (const f of oil) for (const r of f.rows) {
-      if (r.tbo == null || typeof r.td !== 'number' || r.td < 30000) continue; const w = mt(r.n); if (!w || WATER(w.t)) continue;
+      if (r.tbo == null || typeof r.td !== 'number' || r.td < 30000) continue; const w = mt(r.n); if (!w || WATER(w.t) || G.has(w.id)) continue;
       const d = serialDay(r.td), c = tOf(w); if (!c.prod || d > c.prod.d) c.prod = { d, bopd: num(r.tbo), bfpd: num(r.tbf), wc: num(r.twc), gas: num(r.tgas), src: 'prod' };
       const v = num(r.def); if (v > 0 && !(w.id in P.defm)) P.defm[w.id] = r2(v);
     }
@@ -267,14 +280,15 @@
     for (const c of tc.values()) {
       const e = c.eng, p = c.prod, pick = !p ? e : !e ? p : e.d >= p.d ? e : p;
       if (e && p && e.d === p.d && Math.abs((e.bopd || 0) - (p.bopd || 0)) > 0.5 && !c.w.hid && !P.xdate) xdAdd(c.w, `التست (${e.d}): الإنتاج ${r2(p.bopd)} · الهندسية ${r2(e.bopd)} برميل`);
+      if (G.has(c.w.id)) pick.gw = 1;
       const old = (o.tests || {})[c.w.id];
-      if (!old || (pick.d >= old.d && (old.d !== pick.d || old.src !== pick.src || Math.abs((old.bopd || 0) - (pick.bopd || 0)) > 1e-6))) P.tests.push(Object.assign({ w: c.w }, pick));
+      if (!old || !old.gw !== !pick.gw || (pick.d >= old.d && (old.d !== pick.d || old.src !== pick.src || Math.abs((old.bopd || 0) - (pick.bopd || 0)) > 1e-6))) P.tests.push(Object.assign({ w: c.w }, pick));
     }
     // Rig & Rigless of the newest engineering report, with the app's wells it names
     const ef = engs.filter(f => f.act).sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0];
     if (ef) {
       const id = n => { const w = mt(n); return w ? w.id : ''; }, a = ef.act;
-      P.eng = { d: ef.date || o.day, file: ef.name,
+      P.eng = { d: ef.date || o.day, file: ef.name, gw: [...gasNow],
         wo: a.wo.map(x => Object.assign({}, x, { i: id(x.n), next: x.next.map(y => Object.assign({}, y, { i: id(y.n) })) })),
         drill: a.drill.map(x => Object.assign({}, x)), dnext: a.dnext.slice(),
         rigless: a.rigless.map(x => Object.assign({}, x, { ws: x.n.split(/\s*(?:,|&|\band\b)\s*/i).filter(Boolean).map(n => ({ n, i: id(n) })) })) };

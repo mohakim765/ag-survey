@@ -477,3 +477,11 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .rqc.on{background:var(--pen);border-color:var(--pen);color:var(--onpen);font-weight:800}
 .rqc.on::before{content:"\2605\00a0"}
 .tg2x button{min-height:44px}
+/* Rig & Rigless: one card in المتابعة, a row per rig / job */
+.rgrow .wn{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.rgrow{min-height:52px;align-items:center;grid-template-areas:"n m"}
+.rgrow .wm.chev{align-self:center;color:var(--mute);display:inline-flex}
+.rgrow .wm.chev svg{width:20px;height:20px;transform:scaleX(-1)}
+.rgct{display:flex;flex-direction:column;gap:2px;min-width:0}
+.rgct b{white-space:nowrap}
+.rgct small{font-size:12.5px}

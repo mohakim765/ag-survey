@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.15';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.17';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -711,11 +711,12 @@
      count, and open on their own page */
   const DAY_MS = 864e5;
   function downSplit(list, now) { const r = { now: [], long: [], int: [] }; for (const x of list) (x.w.int ? r.int : now - x.e.s > DAY_MS ? r.long : r.now).push(x); return r; }
-  function downLost(list, d, now) { if (!canPlan()) return ''; const s0 = L.dayWindow(d, H())[0], v = list.reduce((a, { w, e }) => a + (bbl(w, Math.max(e.s, s0), now) || 0), 0); return v > 0 ? ' · ضاع النهارده ' + bblTxt(v) : ''; }
+  function downLost(list, d, now) { if (!canPlan()) return ''; const s0 = L.dayWindow(d, H())[0], v = list.reduce((a, { w, e }) => { const l = loss(w, Math.max(e.s, s0), now); return l ? { b: a.b + l.b, g: a.g + l.g } : a; }, { b: 0, g: 0 });
+    return v.b > 0 || v.g > 0 ? ' · ضاع النهارده ' + [v.b > 0 ? bblTxt(v.b) : '', v.g > 0 ? gasTxt(v.g) + ' غاز' : ''].filter(Boolean).join(' و ') : ''; }
   function downRows(list, d, withArea, now, empty) {
     const s0 = L.dayWindow(d, H())[0];
     if (!list.length) return `<p class="empty">${empty || 'مفيش آبار واقفة من أقل من 24 ساعة'}</p>`;
-    return list.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} ${withArea ? `<span class="tag">${esc(areaOf(w.a).n)}</span>` : '<span class="tag dn">واقف</span>'}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(e.s, s0), now)) + ' النهارده' : ''}</span><span class="wm"></span></button>`).join('');
+    return list.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} ${withArea ? `<span class="tag">${esc(areaOf(w.a).n)}</span>` : '<span class="tag dn">واقف</span>'}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(e.s, s0), now)) + ' النهارده' : ''}</span><span class="wm"></span></button>`).join('');
   }
   const DOWNS = { long: 'واقف من أكتر من 24 ساعة', int: 'الآبار المتقطعة المقفولة' };
   function downCards(sp, aid) {
@@ -731,25 +732,55 @@
     h += `<main class="wrap"><section class="sec"><h3>${DOWNS[k]} <small>${list.length}${downLost(list, d, now)}</small></h3>${downRows(list, d, !aid, now, 'مفيش')}</section></main>`;
     return h + tabs('follow');
   }
-  // Rig & Rigless from the newest engineering report (engineers and the admin)
+  // Rig & Rigless from the newest engineering report (engineers and the admin): one card in المتابعة, a page with a row per
+  // rig / job (the rig and the well), and a page for each row with the details
+  const rigE = () => { const days = Object.keys(S.eng || {}).sort(); return days.length ? S.eng[days[days.length - 1]] : null; };
+  const rigEn = (v, cls) => `<span class="${cls || ''}" dir="auto">${esc(v)}</span>`;   // the report's English text keeps its own direction
+  const RIGK = { wo: 'Work Over', drill: 'Drilling', next: 'Drilling', rl: 'Rigless' };
+  function rigItems(E) {
+    const it = [];
+    E.wo.forEach((x, i) => it.push({ k: 'wo', i, rig: x.rig, ws: [{ n: x.n, i: x.i }], job: x.job, sub: x.rel ? 'التسليم المتوقع ' + arDay(x.rel) : '' }));
+    E.drill.forEach((x, i) => it.push({ k: 'drill', i, rig: x.rig, ws: x.well ? [{ n: x.well }] : [], job: '', sub: '' }));
+    if (E.dnext.length) it.push({ k: 'next', i: 0, rig: '', ws: [], job: '', title: 'الآبار الجاية للحفر · ' + E.dnext.length, sub: '' });
+    E.rigless.forEach((x, i) => it.push({ k: 'rl', i, rig: '', ws: x.ws, job: x.job || x.what, sub: '' }));
+    return it;
+  }
   function rigHtml() {
-    const days = Object.keys(S.eng || {}).sort(), E = days.length ? S.eng[days[days.length - 1]] : null;
+    const E = rigE();
+    if (!E) return `<div class="sec scard rgcard"><span class="sch"><span class="rgct"><b>Rig & Rigless</b><small>لسه مفيش تقرير هندسية</small></span></span></div>`;
+    return `<button class="sec scard rgcard" data-act="go" data-v="rig"><span class="sch"><span class="rgct"><b>Rig & Rigless</b><small>تقرير الهندسية ${esc(arDay(E.d))}</small></span><span class="chev">${ic('back')}</span></span></button>`;
+  }
+  function vRig() {
+    const E = rigE();
+    let h = top('Rig & Rigless', E ? 'تقرير الهندسية ' + esc(arDay(E.d)) : '', 'follow') + '<main class="wrap">';
+    if (!E) return h + `<section class="sec"><p class="empty">لسه مفيش تقرير هندسية. ارفعه من الإعدادات ← تحديث من التقارير.</p></section></main>` + tabs('follow');
+    const it = rigItems(E), row = x => `<button class="wrow rgrow" data-act="rigi" data-k="${x.k}" data-i="${x.i}"><span class="wn">${x.rig ? `<span class="rgr">${esc(x.rig)}</span>` : ''}${x.title ? esc(x.title) : x.ws.map(y => `<span class="rgw0">${esc(y.n)}</span>`).join('<span class="mute"> · </span>') || '<span class="mute">—</span>'}</span><span class="wm chev">${ic('back')}</span></button>`;
+    for (const k of ['wo', 'drill', 'rl']) { const l = it.filter(x => RIGK[x.k] === RIGK[k]); if (l.length) h += `<section class="sec"><h3>${RIGK[k]} <small>${l.filter(x => x.k !== 'next').length}</small></h3>${l.map(row).join('')}</section>`; }
+    return h + '</main>' + tabs('follow');
+  }
+  function vRigI() {
+    const E = rigE(), k = V.rk, x = E && (k === 'wo' ? E.wo : k === 'drill' ? E.drill : k === 'rl' ? E.rigless : null);
+    const y = k === 'next' ? (E && E.dnext.length ? E.dnext : null) : x && x[V.ri];
+    if (!y) return vRig();
     const wl = (n, i) => i && WBY[i] ? `<button class="rgw" data-act="well" data-w="${esc(i)}">${esc(n)}</button>` : `<span class="rgw0">${esc(n)}</span>`;
-    const en = (v, cls) => `<span class="${cls || ''}" dir="auto">${esc(v)}</span>`;   // the report's English text keeps its own direction
-    const tx = (lab, v) => v ? `<div class="rgt"><b>${lab}</b>${en(v, 'rgx')}</div>` : '';
-    const plan = v => v ? `<details class="rgd"><summary>الخطة</summary>${en(v, 'rgx')}</details>` : '';
-    let h = `<section class="sec plan rig"><h3>Rig & Rigless <small>${E ? 'تقرير الهندسية ' + esc(arDay(E.d)) : ''}</small></h3>`;
-    if (!E) return h + `<p class="empty">لسه مفيش تقرير هندسية. ارفعه من الإعدادات ← تحديث من التقارير.</p></section>`;
-    h += `<p class="rgk">Work Over <small>${E.wo.length}</small></p>`;
-    h += E.wo.map(x => `<div class="rgi"><div class="rgh"><span class="rgr">${esc(x.rig)}</span>${wl(x.n, x.i)}</div>
-      ${x.job ? `<div class="rgj">${en(x.job)}</div>` : ''}${tx('النهارده', x.op)}${plan(x.plan)}
-      <p class="rgm">${x.rel ? 'التسليم المتوقع ' + esc(arDay(x.rel)) : ''}${x.fm || x.pfm ? ` · FM <bdi dir="ltr">${esc(x.fm || '—')} → ${esc(x.pfm || '—')}</bdi>` : ''}${x.gain ? ` · زيادة متوقعة ${esc(String(x.gain))} برميل` : ''}</p>
-      ${x.next.length ? `<div class="rgt"><b>الآبار الجاية</b><ul class="rgn">${x.next.map(y => `<li>${wl(y.n, y.i)}${y.job ? en(y.job, 'rgx') : ''}</li>`).join('')}</ul></div>` : ''}</div>`).join('') || '<p class="empty">مفيش</p>';
-    if (E.drill.length) h += `<p class="rgk">Drilling <small>${E.drill.length}</small></p>` + E.drill.map(x => `<div class="rgi"><div class="rgh"><span class="rgr">${esc(x.rig)}</span>${en(x.well || '', 'rgw0')}</div>${tx('النهارده', x.done)}</div>`).join('')
-      + (E.dnext.length ? `<div class="rgi"><div class="rgt"><b>الآبار الجاية للحفر</b><ul class="rgn">${E.dnext.map(v => `<li>${en(v, 'rgx')}</li>`).join('')}</ul></div></div>` : '');
-    if (E.rigless.length) h += `<p class="rgk">Rigless <small>${E.rigless.length}</small></p>` + E.rigless.map(x => `<div class="rgi"><div class="rgh">${x.ws.map(y => wl(y.n, y.i)).join('<span class="mute">·</span>')}</div>
-      ${x.job || x.what ? `<div class="rgj">${en(x.job || x.what)}</div>` : ''}${tx('الشغل', x.op)}${plan(x.plan)}</div>`).join('');
-    return h + '</section>';
+    const tx = (lab, v) => v ? `<div class="rgt"><b>${lab}</b>${rigEn(v, 'rgx')}</div>` : '';
+    let title, b = '';
+    if (k === 'wo') {
+      title = y.rig + ' · ' + y.n;
+      b = `<div class="rgh"><span class="rgr">${esc(y.rig)}</span>${wl(y.n, y.i)}</div>${y.job ? `<div class="rgj">${rigEn(y.job)}</div>` : ''}${tx('النهارده', y.op)}${tx('الخطة', y.plan)}
+        <p class="rgm">${[y.rel ? 'التسليم المتوقع ' + esc(arDay(y.rel)) : '', y.fm || y.pfm ? `FM <bdi dir="ltr">${esc(y.fm || '—')} → ${esc(y.pfm || '—')}</bdi>` : '', y.gain ? `زيادة متوقعة ${esc(String(y.gain))} برميل` : ''].filter(Boolean).join(' · ')}</p>
+        ${y.next.length ? `<div class="rgt"><b>الآبار الجاية</b><ul class="rgn">${y.next.map(z => `<li>${wl(z.n, z.i)}${z.job ? rigEn(z.job, 'rgx') : ''}</li>`).join('')}</ul></div>` : ''}`;
+    } else if (k === 'drill') {
+      title = y.rig + (y.well ? ' · ' + y.well : '');
+      b = `<div class="rgh"><span class="rgr">${esc(y.rig)}</span>${rigEn(y.well || '', 'rgw0')}</div>${tx('النهارده', y.done)}`;
+    } else if (k === 'next') {
+      title = 'الآبار الجاية للحفر';
+      b = `<ul class="rgn">${y.map(v => `<li>${rigEn(v, 'rgx')}</li>`).join('')}</ul>`;
+    } else {
+      title = 'Rigless · ' + y.ws.map(z => z.n).join(' · ');
+      b = `<div class="rgh">${y.ws.map(z => wl(z.n, z.i)).join('<span class="mute">·</span>')}</div>${y.job || y.what ? `<div class="rgj">${rigEn(y.job || y.what)}</div>` : ''}${tx('الشغل', y.op)}${tx('الخطة', y.plan)}`;
+    }
+    return top(`<bdi>${esc(title)}</bdi>`, RIGK[k] + ' · تقرير الهندسية ' + esc(arDay(E.d)), 'rig') + `<main class="wrap"><section class="sec rig"><div class="rgi">${b}</div></section></main>` + tabs('follow');
   }
   function areaDown(a, d) {
     const now = Date.now(), [s0, e0] = L.dayWindow(d, H()), cp = canPlan() && editable(), cs = canStaff() && editable();
@@ -761,7 +792,7 @@
     const sp = downSplit(open, now);
     h += `<section class="sec"><h3>واقف دلوقتي <small>${sp.now.length}${downLost(sp.now, d, now)}</small></h3>${downRows(sp.now, d, false, now)}</section>${downCards(sp, a.id)}`;
     h += `<section class="sec"><h3>وقفات النهارده <small>${today.length}</small></h3>`;
-    h += today.length ? today.map(e => { const w = WBY[e.w]; return `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">${hmA(e.s)} ← ${e.e ? hmA(e.e) : 'لسه واقف'} · ${durTxt((e.e || now) - e.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(e.s, s0), Math.min(e.e || now, e0, now))) : ''}</span><span class="wm"></span></button>`; }).join('') : '<p class="empty">مفيش وقفات النهارده</p>';
+    h += today.length ? today.map(e => { const w = WBY[e.w]; return `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">${hmA(e.s)} ← ${e.e ? hmA(e.e) : 'لسه واقف'} · ${durTxt((e.e || now) - e.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(e.s, s0), Math.min(e.e || now, e0, now))) : ''}</span><span class="wm"></span></button>`; }).join('') : '<p class="empty">مفيش وقفات النهارده</p>';
     h += `</section><section class="sec"><h3>ساعات التشغيل <small>من ${H()} الصبح لحد دلوقتي</small></h3>`;
     const rows = visibleWells(a.id).map(w => ({ w, u: L.uptime(S.dt, w.id, d, H(), now) })).filter(x => x.u.down > 0);
     h += rows.length ? rows.map(({ w, u }) => `<div class="irow"><span class="nm">${esc(w.n)}<small>شغال ${u.up} من ${u.span} ساعة</small></span></div>`).join('') : '<p class="empty">كل الآبار شغالة طول الوقت لحد دلوقتي</p>';
@@ -1066,17 +1097,22 @@
     return h + '</div>';
   }
   // the well's oil a day from its newest test (engineers and the admin), and the barrels a stop costs: hours × BOPD / 24
-  const testOf = w => (canPlan() && S.tests && S.tests[w.id] && S.tests[w.id].bopd > 0) ? S.tests[w.id] : null;
-  const bbl = (w, s0, e0) => { const t = testOf(w); return t ? Math.max(0, e0 - s0) / 3600000 * t.bopd / 24 : null; };
+  const testOf = w => { const t = canPlan() && S.tests && S.tests[w.id]; return t && (t.bopd > 0 || (t.gw && t.gas > 0)) ? t : null; };
+  const bbl = (w, s0, e0) => { const t = testOf(w); return t ? Math.max(0, e0 - s0) / 3600000 * (t.bopd || 0) / 24 : null; };
+  // what a stop costs: { b: barrels (oil, or condensate on a gas well), g: gas MMSCF on a gas well }
+  const loss = (w, s0, e0) => { const t = testOf(w); if (!t) return null; const h = Math.max(0, e0 - s0) / 3600000; return { b: h * (t.bopd || 0) / 24, g: t.gw ? h * (t.gas || 0) / 24 : 0 }; };
+  const gasTxt = v => (v < 1 ? Math.round(v * 1000) / 1000 : Math.round(v * 100) / 100) + ' MMSCF';
+  const lossTxt = x => !x ? '' : x.g > 0 ? gasTxt(x.g) + (x.b > 0 ? ' و ' + bblTxt(x.b) + ' كوندنسيت' : '') : bblTxt(x.b);
   const bblTxt = v => v == null ? '' : (v < 10 ? Math.round(v * 10) / 10 : Math.round(v)) + ' برميل';
   const SRC_AR = { eng: 'تقرير الهندسية', prod: 'تقرير الإنتاج' };
   function prodHtml(w, d) {
     const t = testOf(w); if (!t) return '';
     const n = v => v == null ? '—' : String(Math.round(v * 100) / 100), [s0, e0] = L.dayWindow(d, H()), now = Date.now(), end = Math.min(e0, now);
-    const lost = dayEvents(w.id, d).reduce((a, x) => a + bbl(w, Math.max(x.s, s0), Math.min(x.e || now, end)), 0), rp = S.reps && S.reps[d] && S.reps[d].defm && S.reps[d].defm[w.id];
-    return `<div class="prod"><div class="prh"><span><b>${n(t.bopd)}</b> برميل زيت في اليوم</span><small>آخر تست ${esc(t.d)} · ${esc(SRC_AR[t.src] || '')}</small></div>
-      <div class="prs">BFPD ${n(t.bfpd)} · W.C ${n(t.wc)}% · غاز ${n(t.gas)} MMSCFD</div>
-      <div class="prs">كل ساعة وقوف = <b>${bblTxt(t.bopd / 24)}</b>${lost > 0 ? ` · ضاع النهارده <b>${bblTxt(lost)}</b>` : ''}${rp ? ` · تقرير الإنتاج: ${bblTxt(rp)}` : ''}</div></div>`;
+    const lost = dayEvents(w.id, d).reduce((a, x) => { const l = loss(w, Math.max(x.s, s0), Math.min(x.e || now, end)); return { b: a.b + l.b, g: a.g + l.g }; }, { b: 0, g: 0 }), rp = S.reps && S.reps[d] && S.reps[d].defm && S.reps[d].defm[w.id];
+    const head = t.gw ? `<span><b>${n(t.gas)}</b> MMSCFD غاز${t.bopd > 0 ? ` · ${n(t.bopd)} برميل كوندنسيت` : ''}</span>` : `<span><b>${n(t.bopd)}</b> برميل زيت في اليوم</span>`;
+    return `<div class="prod"><div class="prh">${head}<small>${t.gw ? 'بير غاز · ' : ''}آخر تست ${esc(t.d)} · ${esc(SRC_AR[t.src] || '')}</small></div>
+      <div class="prs">BFPD ${n(t.bfpd)} · W.C ${n(t.wc)}%${t.gw ? '' : ` · غاز ${n(t.gas)} MMSCFD`}</div>
+      <div class="prs">كل ساعة وقوف = <b>${lossTxt(loss(w, 0, 3600000))}</b>${lost.b > 0 || lost.g > 0 ? ` · ضاع النهارده <b>${lossTxt(lost)}</b>` : ''}${rp ? ` · تقرير الإنتاج: ${bblTxt(rp)}` : ''}</div></div>`;
   }
   function statusHtml(w, ro) {
     const e = L.openEvent(S.dt, w.id), d = viewDay(), evs = dayEvents(w.id, d), [s0, e0] = L.dayWindow(d, H()), now = Date.now();
@@ -1086,7 +1122,7 @@
     else h += `<div class="stbox"><div class="stq"><span class="stl">البير شغال؟</span>${ro ? '<span class="mute">أيوه</span>' : `<div class="seg qseg"><button class="on" type="button" disabled>أيوه</button>${w.int ? '<button type="button" data-act="intclose">اتقفل PBU</button>' : ''}<button type="button" class="no" data-act="down">لأ، واقف</button></div>`}</div>`;
     if (evs.length) {
       const dm = L.downMs(S.dt, w.id, s0, Math.min(e0, now)), span = Math.min(e0, now) - s0;
-      h += `<div class="evs"><p class="evh">النهارده وقف <b>${durTxt(dm)}</b> · اشتغل ${durTxt(Math.max(0, span - dm))}</p>${evs.map(x => `<div class="ev"><span class="evt">${esc(x.r)}${x.o ? ' · ' + esc(x.o) : ''}<small>${hmA(x.s)} ← ${x.e ? hmA(x.e) : 'لسه واقف'} · ${durTxt((x.e || now) - x.s)}${testOf(w) ? ' · ' + bblTxt(bbl(w, Math.max(x.s, s0), Math.min(x.e || now, e0, now))) : ''}${x.byn ? ' · ' + esc(x.byn) : ''}</small></span>${canEditEv(x) ? `<button class="ib3" data-act="evedit" data-e="${x.id}" aria-label="تعديل">✎</button>` : ''}</div>`).join('')}</div>`;
+      h += `<div class="evs"><p class="evh">النهارده وقف <b>${durTxt(dm)}</b> · اشتغل ${durTxt(Math.max(0, span - dm))}</p>${evs.map(x => `<div class="ev"><span class="evt">${esc(x.r)}${x.o ? ' · ' + esc(x.o) : ''}<small>${hmA(x.s)} ← ${x.e ? hmA(x.e) : 'لسه واقف'} · ${durTxt((x.e || now) - x.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(x.s, s0), Math.min(x.e || now, e0, now))) : ''}${x.byn ? ' · ' + esc(x.byn) : ''}</small></span>${canEditEv(x) ? `<button class="ib3" data-act="evedit" data-e="${x.id}" aria-label="تعديل">✎</button>` : ''}</div>`).join('')}</div>`;
     }
     if (!ro && !e) h += `<button class="linkbtn" data-act="evadd">+ سجّل وقفة حصلت وخلصت</button>`;
     return h + '</div>' + prodHtml(w, d);
@@ -1393,14 +1429,15 @@
       ask: P.ask.map(a => ({ i: a.w.id, n: a.w.n, x: repWhy(a), from: a.from, ty: a.ty, set: a.set })),
       xs: P.xs.map(c => repIt(c.w, `${repXs(c)} · ${c.set ? 'اتقفل' : 'متقفلش'}`)),
       xsAsk: P.xs.map(c => ({ i: c.w.id, n: c.w.n, x: repXs(c), set: c.set })),
-      xd: P.xd.map(d => repIt(d.w, d.x)), xdate: P.xdate || null, nt: P.tests.length, defm: P.defm, eng: P.eng ? P.eng.d : null,
+      xd: P.xd.map(d => repIt(d.w, d.x)), xdate: P.xdate || null, nt: P.tests.length, gskip: P.gasSkip || 0, gwarn: files.some(f => f.kind === 'oil') && !files.some(f => f.kind === 'eng') && !P.gas ? 1 : 0, defm: P.defm, eng: P.eng ? P.eng.d : null,
       dup: P.dup.map(d => repIt(d.w, d.rows ? 'مرتين في الشيت: ' + d.rows.map(r => `${r.st}${REP.num(r.hrs) != null ? ' ' + REP.num(r.hrs) + ' ساعة' : ''}`).join(' و') + ' · متقفلش'
         : `${d.f === 'k' ? 'Factor' : 'التارجت'} في الشيت مرتين: ${d.v.map(v => v || 'قراية مباشرة').join(' و')} · متغيرش`)),
       keep: P.keep.map(c => repIt(c.w, 'في البرنامج مسجل إنه اشتغل ' + L.stamp(c.e.e))),
       miss: P.miss.map(r => ({ n: r.n, x: r.st || '' })), absent: P.absent.map(w => repIt(w)) };
   }
+  const gasWells = () => { const ds = Object.keys(S.eng || {}).sort(); for (let i = ds.length - 1; i >= 0; i--) if ((S.eng[ds[i]].gw || []).length) return S.eng[ds[i]].gw; return []; };
   function repPlanNow() {
-    RP.plan = REP.plan({ files: RP.files, wells: WELLS, alias: SEED.alias, dt: S.dt, day: RP.day, L, h: H(), now: Date.now(), today: curDay(), ty: RP.ty || {}, xs: RP.xs || {} });
+    RP.plan = REP.plan({ files: RP.files, wells: WELLS, alias: SEED.alias, dt: S.dt, day: RP.day, L, h: H(), now: Date.now(), today: curDay(), ty: RP.ty || {}, xs: RP.xs || {}, gasw: gasWells() });
     RP.rec = repRecord(RP.plan, RP.files);
   }
   async function repRead(list) {
@@ -1424,6 +1461,8 @@
     if (rec.stale) h += `<div class="banner">التقرير ده عن يوم فات عليه أكتر من يوم. الآبار اللي هتتقفل هتبقى واقفة من يومه، ولو فيه بير رجع اشتغل من وقتها، الفني يسجل إنه رجع.</div>`;
     const cnt = k => (rec[k] || []).length, any = ['running', 'hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].some(k => cnt(k));
     h += `<div class="rchips">${cnt('close') ? `<span class="chip dn"><b>${cnt('close')}</b> ${preview ? 'هيتقفلوا' : 'اتقفلوا'}</span>` : ''}${cnt('tg') ? `<span class="chip"><b>${cnt('tg')}</b> تارجت وفاكتور</span>` : ''}${rec.nt ? `<span class="chip"><b>${rec.nt}</b> تست ${preview ? 'هيتحدّث' : 'اتحدّث'}</span>` : ''}${rec.eng ? `<span class="chip">Rig & Rigless ${esc(rec.eng.slice(5))}</span>` : ''}${any ? `<span class="chip w"><b>${['running', 'hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].reduce((n, k) => n + cnt(k), 0)}</b> فرق محتاج مراجعة</span>` : '<span class="chip">مفيش فرق في الحالة والساعات</span>'}</div>`;
+    if (rec.gwarn) h += `<div class="banner" style="margin-top:10px">تقرير الإنتاج بيكتب آبار الغاز SI حتى لو شغالة، والبرنامج لسه معندوش قايمة آبار الغاز. ارفع تقرير الهندسية معاه مرة عشان آبار الغاز متتقفلش غلط.</div>`;
+    if (rec.gskip) h += `<p class="mute" style="margin:8px 0 0">آبار الغاز حالتها من تقرير الهندسية، فمتقفلتش من تقرير الإنتاج.</p>`;
     if (rec.xdate) h += `<div class="banner" style="margin-top:10px">تقرير الهندسية بتاريخ ${esc(rec.xdate.eng)} وتقرير الإنتاج بتاريخ ${esc(rec.xdate.oil)}. مش نفس اليوم، فمقارنتش بينهم.</div>`;
     if (rec.hidStop) h += `<p class="mute" style="margin:8px 0 0">و${rec.hidStop} بير مخفي عن الفنيين واقف في التقرير، دول متقفلوش في البرنامج.</p>`;
     h += preview ? `<div class="btns" style="margin-top:12px"><button class="btn" data-act="repclear">إلغاء</button><button class="btn pen" data-act="repok">${cnt('close') || cnt('tg') || rec.nt || rec.eng ? 'اعتمد' : 'احفظ المقارنة'}</button></div>`
@@ -1468,7 +1507,7 @@
     for (const a of P.ask) if (a.set) setEdit(a.w.id, 't', a.set);
     delete rec.ask; delete rec.xsAsk;
     const by = { by: S.me, byn: (me() || {}).name || '', t: Date.now() };
-    S.tests = S.tests || {}; for (const x of P.tests) { S.tests[x.w.id] = Object.assign({ d: x.d, bopd: x.bopd, bfpd: x.bfpd, wc: x.wc, gas: x.gas, src: x.src, day: P.day }, by); mark('wt|' + x.w.id); }
+    S.tests = S.tests || {}; for (const x of P.tests) { S.tests[x.w.id] = Object.assign({ d: x.d, bopd: x.bopd, bfpd: x.bfpd, wc: x.wc, gas: x.gas, src: x.src, day: P.day }, x.gw ? { gw: 1 } : {}, by); mark('wt|' + x.w.id); }
     if (P.eng) { S.eng = S.eng || {}; S.eng[P.eng.d] = Object.assign({}, P.eng, by); mark('en|' + P.eng.d); for (const k of Object.keys(S.eng).sort().slice(0, -30)) delete S.eng[k]; }
     for (const { w, r } of P.close) { const e = Object.assign({ id: uid(), w: w.id, s: s0, e: null, r: r.cause || 'SI', o: 'تقرير الإنتاج ' + lab, src: 'rep' }, stampBy()); pushEv(e); audit(w.id, w.n, 'داون تايم', '', 'واقف في تقرير ' + lab, curDay()); }
     for (const c of P.tg) setEdit(c.w.id, c.f, c.b || 0);
@@ -1663,7 +1702,7 @@
     if (isPending(me())) { stopGeo(); WAITING = true; app.innerHTML = vWait(); return; }
     if (!(V.v === 'area' && (V.tab || 'wells') === 'wells' && S.ui.mode === 'map')) stopGeo();
     const v = V.v;
-    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? vFollow() : v === 'staff' ? vStaff() : v === 'downs' ? vDowns() : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && canWells() ? vAdmin() : v === 'rep' && canWells() ? vRep() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
+    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? vFollow() : v === 'staff' ? vStaff() : v === 'downs' ? vDowns() : v === 'rig' ? (canPlan() ? vRig() : vFollow()) : v === 'rigi' ? (canPlan() ? vRigI() : vFollow()) : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && canWells() ? vAdmin() : v === 'rep' && canWells() ? vRep() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
   }
   let WAITING = false; // the waiting screen of a new account was shown
   function go(v, extra) { V = Object.assign({ v }, extra || {}); render(); window.scrollTo(0, 0); }
@@ -1675,6 +1714,7 @@
       case 'go': return go(b.dataset.v, b.dataset.d ? { rpd: b.dataset.d } : null);
       case 'area': S.ui.lastArea = b.dataset.a; save(); return go('area', { a: b.dataset.a, tab: b.dataset.t || 'wells' });
       case 'downs': return go('downs', { dk: b.dataset.k, da: b.dataset.a || '' });
+      case 'rigi': return go('rigi', { rk: b.dataset.k, ri: +b.dataset.i || 0 });
       case 'stab': V.tab = b.dataset.v; return render();
       case 'mode': S.ui.mode = b.dataset.v; save(); return render();
       case 'mmeas': if (MAPV) { MAPV.meas = !MAPV.meas; b.classList.toggle('on', MAPV.meas);
@@ -1890,7 +1930,8 @@
   if (Cap && Cap.App) Cap.App.addListener('backButton', () => { if (!modalEl.hidden) return closeModal(); if (FM) return closeForm();
     if (!me()) { if (V.auth) { V = { v: 'home', lu: V.lu }; return render(); } return Cap.App.exitApp(); }
     if (V.v === 'downs' && V.da) return go('area', { a: V.da, tab: 'dt' });
-    if (V.v !== 'home' && !isPending(me())) return go(['admin', 'audit', 'users', 'rep'].includes(V.v) ? 'settings' : ['staff', 'downs'].includes(V.v) ? 'follow' : 'home'); Cap.App.exitApp(); });
+    if (V.v === 'rigi') return go('rig');
+    if (V.v !== 'home' && !isPending(me())) return go(['admin', 'audit', 'users', 'rep'].includes(V.v) ? 'settings' : ['staff', 'downs', 'rig'].includes(V.v) ? 'follow' : 'home'); Cap.App.exitApp(); });
   // a new production day starts while the app is open
   setInterval(() => { if (!FM && modalEl.hidden && me() && !VDAY && document.activeElement === document.body) render(); }, 60000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) { flushForm(); bgStash(); saveNow(); } });
