@@ -1,6 +1,8 @@
 /* AG Survey: reads the daily Excel reports on the phone (.xls, .xlsx, .xlsm), no library needed.
    XL.read(bytes) -> Promise<[{ name, cells: Map(row -> Map(col -> value)) }]>   rows and columns count from 1.
-   .xls files saved with "protect workbook" are encrypted with Excel's built-in password (RC4 CryptoAPI); that is handled here. */
+   .xls files saved with "protect workbook" are encrypted with Excel's built-in password; a file with a password to open needs
+   that password: XL.read(bytes, { pw: [passwords] }) tries Excel's own, then these. RC4 CryptoAPI (SHA-1) and the older RC4
+   (MD5) are both read. A wrong or missing password throws an error with code 'PW'; opt.used gets the password that opened it. */
 (function (root) {
   'use strict';
   const td16 = new TextDecoder('utf-16le'), td8 = new TextDecoder('utf-8'), tdLatin = new TextDecoder('windows-1252');
@@ -29,6 +31,25 @@
     let i = 0, j = 0;
     return n => { const out = new Uint8Array(n); for (let k = 0; k < n; k++) { i = (i + 1) & 255; j = (j + s[i]) & 255; const t = s[i]; s[i] = s[j]; s[j] = t; out[k] = s[(s[i] + s[j]) & 255]; } return out; };
   }
+  // MD5 (the older RC4 encryption of .xls)
+  const MD5K = new Uint32Array(64).map((_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 4294967296)), MD5S = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+  function md5(bytes) {
+    const l = bytes.length, n = ((l + 9 + 63) >> 6) << 6, m = new Uint8Array(n); m.set(bytes); m[l] = 0x80;
+    const dv = new DataView(m.buffer); dv.setUint32(n - 8, (l * 8) >>> 0, true); dv.setUint32(n - 4, Math.floor(l / 0x20000000), true);
+    let a0 = 0x67452301, b0 = 0xefcdab89, c0 = 0x98badcfe, d0 = 0x10325476;
+    for (let o = 0; o < n; o += 64) {
+      let A = a0, B = b0, C = c0, D = d0;
+      for (let i = 0; i < 64; i++) {
+        let F, g;
+        if (i < 16) { F = (B & C) | (~B & D); g = i; } else if (i < 32) { F = (D & B) | (~D & C); g = (5 * i + 1) & 15; }
+        else if (i < 48) { F = B ^ C ^ D; g = (3 * i + 5) & 15; } else { F = C ^ (B | ~D); g = (7 * i) & 15; }
+        F = (F + A + MD5K[i] + dv.getUint32(o + g * 4, true)) >>> 0; A = D; D = C; C = B;
+        const r = MD5S[((i >> 4) << 2) | (i & 3)]; B = (B + ((F << r) | (F >>> (32 - r)))) >>> 0;
+      }
+      a0 = (a0 + A) >>> 0; b0 = (b0 + B) >>> 0; c0 = (c0 + C) >>> 0; d0 = (d0 + D) >>> 0;
+    }
+    const out = new Uint8Array(16), ov = new DataView(out.buffer); [a0, b0, c0, d0].forEach((x, i) => ov.setUint32(i * 4, x, true)); return out;
+  }
   const cat = (...a) => { const o = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let p = 0; for (const x of a) { o.set(x, p); p += x.length; } return o; };
   const le32 = v => new Uint8Array([v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]);
   const utf16 = s => { const o = new Uint8Array(s.length * 2); for (let i = 0; i < s.length; i++) { o[i * 2] = s.charCodeAt(i) & 255; o[i * 2 + 1] = s.charCodeAt(i) >> 8; } return o; };
@@ -52,18 +73,35 @@
 
   // ---------------- BIFF8 (.xls) ----------------
   const PLAIN = new Set([0x0809, 0x002F, 0x0194, 0x0195, 0x00E1, 0x0196, 0x0138]); // never encrypted
-  function decryptXls(w) {
+  function decryptXls(w, opt) {
     const dv = new DataView(w.buffer, w.byteOffset, w.byteLength);
     let p = 0, fp = -1;
     while (p + 4 <= w.length && p < 4096) { const t = dv.getUint16(p, true), l = dv.getUint16(p + 2, true); if (t === 0x2F) { fp = p; break; } p += 4 + l; }
     if (fp < 0) return w;
     const d = fp + 4; if (dv.getUint16(d, true) !== 1) throw new Error('الملف محمي بنوع تشفير مش مدعوم');
-    const vMajor = dv.getUint16(d + 2, true); if (vMajor < 2) throw new Error('الملف محمي بباسورد قديم مش مدعوم');
-    const hs = dv.getUint32(d + 10, true), h = d + 14, keyBits = dv.getUint32(h + 16, true) || 40, v = h + hs;
-    const salt = w.slice(v + 4, v + 20), ev = w.slice(v + 20, v + 36), evh = w.slice(v + 40, v + 60);
-    const h0 = sha1(cat(salt, utf16('VelvetSweatshop')));
-    const key = b => { const x = sha1(cat(h0, le32(b))); return keyBits === 40 ? cat(x.subarray(0, 5), new Uint8Array(11)) : x.subarray(0, keyBits / 8); };
-    { const ks = rc4(key(0))(36), vv = ev.map((x, i) => x ^ ks[i]), vh = evh.map((x, i) => x ^ ks[16 + i]), hh = sha1(vv); if (hh.some((x, i) => x !== vh[i])) throw new Error('الملف محمي بباسورد، افتحه واحفظه من غير باسورد'); }
+    const vMajor = dv.getUint16(d + 2, true), same = (a, b) => a.every((x, i) => x === b[i]);
+    let mk;   // password -> (block number -> RC4 key) when it is the right password, else null
+    if (vMajor === 1) {   // RC4 (Office 97/2000 compatible): MD5
+      const salt = w.slice(d + 6, d + 22), ev = w.slice(d + 22, d + 38), evh = w.slice(d + 38, d + 54);
+      mk = pw => {
+        const t0 = md5(utf16(pw)).subarray(0, 5), ib = new Uint8Array(336); for (let i = 0; i < 16; i++) { ib.set(t0, i * 21); ib.set(salt, i * 21 + 5); }
+        const t1 = md5(ib).subarray(0, 5), key = b => md5(cat(t1, le32(b)));
+        const ks = rc4(key(0))(32), vv = ev.map((x, i) => x ^ ks[i]), vh = evh.map((x, i) => x ^ ks[16 + i]);
+        return same(md5(vv), vh) ? key : null;
+      };
+    } else {              // RC4 CryptoAPI: SHA-1
+      const hs = dv.getUint32(d + 10, true), h = d + 14, keyBits = dv.getUint32(h + 16, true) || 40, v = h + hs;
+      const salt = w.slice(v + 4, v + 20), ev = w.slice(v + 20, v + 36), evh = w.slice(v + 40, v + 60);
+      mk = pw => {
+        const h0 = sha1(cat(salt, utf16(pw)));
+        const key = b => { const x = sha1(cat(h0, le32(b))); return keyBits === 40 ? cat(x.subarray(0, 5), new Uint8Array(11)) : x.subarray(0, keyBits / 8); };
+        const ks = rc4(key(0))(36), vv = ev.map((x, i) => x ^ ks[i]), vh = evh.map((x, i) => x ^ ks[16 + i]);
+        return same(sha1(vv), vh) ? key : null;
+      };
+    }
+    const pws = (opt && opt.pw) || []; let key = null;
+    for (const pw of ['VelvetSweatshop'].concat(pws)) if (pw && (key = mk(pw))) { if (opt) opt.used = pw; break; }
+    if (!key) { const e = new Error(pws.length ? 'الباسورد غلط' : 'الملف عليه باسورد'); e.code = 'PW'; throw e; }
     const out = new Uint8Array(w);
     for (let b = 0; b * 1024 < w.length; b++) { const n = Math.min(1024, w.length - b * 1024), ks = rc4(key(b))(n); for (let i = 0; i < n; i++) out[b * 1024 + i] ^= ks[i]; }
     p = 0; while (p + 4 <= w.length) {   // headers and some records stay as they were
@@ -75,8 +113,8 @@
     return out;
   }
   function rk(v) { let n; if (v & 2) n = v >> 2; else { const b = new DataView(new ArrayBuffer(8)); b.setUint32(4, v & 0xFFFFFFFC, true); n = b.getFloat64(0, true); } return v & 1 ? n / 100 : n; }
-  function readXls(buf) {
-    const w = decryptXls(cfbStream(buf, /^(Workbook|Book)$/)), dv = new DataView(w.buffer, w.byteOffset, w.byteLength);
+  function readXls(buf, opt) {
+    const w = decryptXls(cfbStream(buf, /^(Workbook|Book)$/), opt), dv = new DataView(w.buffer, w.byteOffset, w.byteLength);
     const recs = []; for (let p = 0; p + 4 <= w.length;) { const t = dv.getUint16(p, true), l = dv.getUint16(p + 2, true); recs.push([t, p + 4, l]); p += 4 + l; }
     const byPos = new Map(); recs.forEach((r, i) => byPos.set(r[1] - 4, i));
     // a string that can run on into CONTINUE records; at each new CONTINUE the characters' width can change
@@ -155,13 +193,13 @@
     return out;
   }
 
-  async function read(bytes) {
+  async function read(bytes, opt) {
     const b = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
     if (b[0] === 0x50 && b[1] === 0x4B) return readXlsx(b);
-    if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) return readXls(b);
+    if (b[0] === 0xD0 && b[1] === 0xCF && b[2] === 0x11 && b[3] === 0xE0) return readXls(b, opt);
     throw new Error('الملف ده مش Excel');
   }
   // Excel day number -> YYYY-MM-DD
   const serialDay = n => { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 864e5); return d.toISOString().slice(0, 10); };
-  root.XL = { read, serialDay, _sha1: sha1 };
+  root.XL = { read, serialDay, _sha1: sha1, _md5: md5 };
 })(typeof self !== 'undefined' ? self : this);
