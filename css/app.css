@@ -485,3 +485,11 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .rgct{display:flex;flex-direction:column;gap:2px;min-width:0}
 .rgct b{white-space:nowrap}
 .rgct small{font-size:12.5px}
+/* report: wells that run again */
+.chip.up{background:var(--ok-bg,#deefe0);color:var(--ok,#176442);border-color:transparent}
+.rsec.up h3{border-inline-start:6px solid var(--ok,#176442)}
+/* the day of a stop's time: النهارده / امبارح, and the exact date and time under it */
+.seg.dpick{margin-top:8px}
+.seg.dpick button{min-height:44px}
+.tprev{margin:6px 2px 0;font-size:13.5px;color:var(--mute);min-height:1.2em}
+.tprev.bad{color:var(--bad);font-weight:700}

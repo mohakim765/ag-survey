@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.18';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.19';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -716,7 +716,7 @@
   function downRows(list, d, withArea, now, empty) {
     const s0 = L.dayWindow(d, H())[0];
     if (!list.length) return `<p class="empty">${empty || 'مفيش آبار واقفة من أقل من 24 ساعة'}</p>`;
-    return list.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} ${withArea ? `<span class="tag">${esc(areaOf(w.a).n)}</span>` : '<span class="tag dn">واقف</span>'}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(e.s, s0), now)) + ' النهارده' : ''}</span><span class="wm"></span></button>`).join('');
+    return list.map(({ w, e }) => `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)} ${withArea ? `<span class="tag">${esc(areaOf(w.a).n)}</span>` : '<span class="tag dn">واقف</span>'}</span><span class="ws">${esc(e.r)}${evNote(e) ? ' · ' + esc(evNote(e)) : ''}</span><span class="wa">من ${hmA(e.s)} · بقاله ${durTxt(now - e.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(e.s, s0), now)) + ' النهارده' : ''}</span><span class="wm"></span></button>`).join('');
   }
   const DOWNS = { long: 'واقف من أكتر من 24 ساعة', int: 'الآبار المتقطعة المقفولة' };
   function downCards(sp, aid) {
@@ -792,7 +792,7 @@
     const sp = downSplit(open, now);
     h += `<section class="sec"><h3>واقف دلوقتي <small>${sp.now.length}${downLost(sp.now, d, now)}</small></h3>${downRows(sp.now, d, false, now)}</section>${downCards(sp, a.id)}`;
     h += `<section class="sec"><h3>وقفات النهارده <small>${today.length}</small></h3>`;
-    h += today.length ? today.map(e => { const w = WBY[e.w]; return `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)}</span><span class="ws">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''}</span><span class="wa">${hmA(e.s)} ← ${e.e ? hmA(e.e) : 'لسه واقف'} · ${durTxt((e.e || now) - e.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(e.s, s0), Math.min(e.e || now, e0, now))) : ''}</span><span class="wm"></span></button>`; }).join('') : '<p class="empty">مفيش وقفات النهارده</p>';
+    h += today.length ? today.map(e => { const w = WBY[e.w]; return `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)}</span><span class="ws">${esc(e.r)}${evNote(e) ? ' · ' + esc(evNote(e)) : ''}</span><span class="wa">${hmA(e.s)} ← ${e.e ? hmA(e.e) : 'لسه واقف'} · ${durTxt((e.e || now) - e.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(e.s, s0), Math.min(e.e || now, e0, now))) : ''}</span><span class="wm"></span></button>`; }).join('') : '<p class="empty">مفيش وقفات النهارده</p>';
     h += `</section><section class="sec"><h3>ساعات التشغيل <small>من ${H()} الصبح لحد دلوقتي</small></h3>`;
     const rows = visibleWells(a.id).map(w => ({ w, u: L.uptime(S.dt, w.id, d, H(), now) })).filter(x => x.u.down > 0);
     h += rows.length ? rows.map(({ w, u }) => `<div class="irow"><span class="nm">${esc(w.n)}<small>شغال ${u.up} من ${u.span} ساعة</small></span></div>`).join('') : '<p class="empty">كل الآبار شغالة طول الوقت لحد دلوقتي</p>';
@@ -1105,6 +1105,7 @@
   const lossTxt = x => !x ? '' : x.g > 0 ? gasTxt(x.g) + (x.b > 0 ? ' و ' + bblTxt(x.b) + ' كوندنسيت' : '') : bblTxt(x.b);
   const bblTxt = v => v == null ? '' : (v < 10 ? Math.round(v * 10) / 10 : Math.round(v)) + ' برميل';
   const SRC_AR = { eng: 'تقرير الهندسية', prod: 'تقرير الإنتاج' };
+  const evNote = x => x.src === 'rep' ? '' : x.o || '';   // older stops from a report had the report in the note
   function prodHtml(w, d) {
     const t = testOf(w); if (!t) return '';
     const n = v => v == null ? '—' : String(Math.round(v * 100) / 100), [s0, e0] = L.dayWindow(d, H()), now = Date.now(), end = Math.min(e0, now);
@@ -1117,12 +1118,13 @@
   function statusHtml(w, ro) {
     const e = L.openEvent(S.dt, w.id), d = viewDay(), evs = dayEvents(w.id, d), [s0, e0] = L.dayWindow(d, H()), now = Date.now();
     let h = jobsHtml(w, d, e, evs, ro);
-    if (e) h += `<div class="stbox dn"><div class="stq"><span class="stl"><span class="dot dn"></span>واقف من ${L.stamp(e.s)}</span></div><p class="mute" style="margin:4px 0 8px">${esc(e.r)}${e.o ? ' · ' + esc(e.o) : ''} · بقاله ${durTxt(now - e.s)}</p>
+    const ran = evs.some(x => x.e);   // the well ran part of today: today's stops are listed
+    if (e) h += `<div class="stbox dn"><div class="stq"><span class="stl"><span class="dot dn"></span>واقف من ${L.stamp(e.s)}</span>${!ran && canEditEv(e) ? `<button class="ib3" data-act="evedit" data-e="${e.id}" aria-label="تعديل">✎</button>` : ''}</div><p class="mute" style="margin:4px 0 8px">${esc(e.r)}${evNote(e) ? ' · ' + esc(evNote(e)) : ''} · بقاله ${durTxt(now - e.s)}</p>
       ${ro ? '' : `<div class="stq"><span class="stl">${w.int ? 'البير اتفتح؟' : 'البير رجع اشتغل؟'}</span><button class="btn pen sm" data-act="${w.int ? 'intopen' : 'up'}">${w.int ? 'أيوه، اتفتح' : 'أيوه، رجع'}</button></div>`}`;
     else h += `<div class="stbox"><div class="stq"><span class="stl">البير شغال؟</span>${ro ? '<span class="mute">أيوه</span>' : `<div class="seg qseg"><button class="on" type="button" disabled>أيوه</button>${w.int ? '<button type="button" data-act="intclose">اتقفل PBU</button>' : ''}<button type="button" class="no" data-act="down">لأ، واقف</button></div>`}</div>`;
-    if (evs.length) {
-      const dm = L.downMs(S.dt, w.id, s0, Math.min(e0, now)), span = Math.min(e0, now) - s0;
-      h += `<div class="evs"><p class="evh">النهارده وقف <b>${durTxt(dm)}</b> · اشتغل ${durTxt(Math.max(0, span - dm))}</p>${evs.map(x => `<div class="ev"><span class="evt">${esc(x.r)}${x.o ? ' · ' + esc(x.o) : ''}<small>${hmA(x.s)} ← ${x.e ? hmA(x.e) : 'لسه واقف'} · ${durTxt((x.e || now) - x.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(x.s, s0), Math.min(x.e || now, e0, now))) : ''}${x.byn ? ' · ' + esc(x.byn) : ''}</small></span>${canEditEv(x) ? `<button class="ib3" data-act="evedit" data-e="${x.id}" aria-label="تعديل">✎</button>` : ''}</div>`).join('')}</div>`;
+    if (ran) {
+      const dm = L.downMs(S.dt, w.id, s0, Math.min(e0, now)), span = Math.min(e0, now) - s0, up = span - dm;
+      h += `<div class="evs"><p class="evh">النهارده وقف <b>${durTxt(dm)}</b>${up >= 60000 ? ` · اشتغل ${durTxt(up)}` : ''}</p>${evs.map(x => `<div class="ev"><span class="evt">${esc(x.r)}${evNote(x) ? ' · ' + esc(evNote(x)) : ''}<small>${hmA(x.s)} ← ${x.e ? hmA(x.e) : 'لسه واقف'} · ${durTxt((x.e || now) - x.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(x.s, s0), Math.min(x.e || now, e0, now))) : ''}${x.byn ? ' · ' + esc(x.byn) : ''}</small></span>${canEditEv(x) ? `<button class="ib3" data-act="evedit" data-e="${x.id}" aria-label="تعديل">✎</button>` : ''}</div>`).join('')}</div>`;
     }
     if (!ro && !e) h += `<button class="linkbtn" data-act="evadd">+ سجّل وقفة حصلت وخلصت</button>`;
     return h + '</div>' + prodHtml(w, d);
@@ -1249,20 +1251,39 @@
     return String(H24).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
   }
   const BADTIME = 'الساعة من 1 لـ 12، والدقايق من 0 لـ 59';
+  /* which production day a stop's time is on: النهارده / امبارح (6 الصبح لـ 6 الصبح), so the morning shift can write a stop of
+     4 الفجر; a line under it says the exact date and time */
+  const tsOn = (hmv, day) => { const [hh, mm] = hmv.split(':').map(Number), [a] = L.dayWindow(day, H()), d = new Date(a); d.setHours(hh, mm || 0, 0, 0); if (hh < H()) d.setDate(d.getDate() + 1); return d.getTime(); };
+  const FUTURE = 'الساعة دي لسه مجتش. لو كانت امبارح اختار «امبارح»';
+  function dayPick(tid, sel) {
+    const vd = viewDay(), days = [vd, L.addDays(vd, -1)]; sel = sel || vd; if (!days.includes(sel)) days.push(sel);
+    const lab = d => d === curDay() ? 'النهارده' : d === L.addDays(curDay(), -1) ? 'امبارح' : esc(arDay(d));
+    return `<div class="seg dpick" id="${tid}d">${days.map(d => `<button type="button" data-act="dpick" data-v="${d}" class="${d === sel ? 'on' : ''}">${lab(d)}</button>`).join('')}</div><p class="tprev" id="${tid}p"></p>`;
+  }
+  const pickedDay = tid => { const b = document.querySelector(`#${tid}d .on`); return b ? b.dataset.v : viewDay(); };
+  const pickedTs = tid => { const v = readTime(tid); return v ? tsOn(v, pickedDay(tid)) : v; };   // '' empty, null wrong, else the time
+  function tPrev(tid) {
+    const el = document.getElementById(tid + 'p'); if (!el) return; const t = pickedTs(tid), now = Date.now();
+    if (!t) { el.textContent = ''; el.className = 'tprev'; return; }
+    const cal = L.prodDay(t, 0), when = `${arDay(cal)} الساعة ${hmA(t)}`;
+    el.className = 'tprev' + (t > now + 60000 ? ' bad' : '');
+    el.textContent = t > now + 60000 ? FUTURE : 'يعني ' + when + (now - t >= 60000 ? ' · من ' + durTxt(now - t) : '');
+  }
+  function tWatch(...ids) { for (const id of ids) { const el = document.getElementById(id); if (el) el.addEventListener('input', () => tPrev(id)); tPrev(id); } }
   function dayEvents(wid, d) { const [s0, e0] = L.dayWindow(d, H()); return S.dt.filter(e => e.w === wid && e.s < e0 && (e.e == null || e.e > s0)).sort((a, b) => a.s - b.s); }
   const hrsWord = h => h === 1 ? 'ساعة' : h === 2 ? 'ساعتين' : h + (h <= 10 ? ' ساعات' : ' ساعة');
   const durTxt = ms => { const m = Math.max(1, Math.round(ms / 60000)); if (m < 60) return m + ' دقيقة'; const h = Math.floor(m / 60), r = m % 60;
     if (h >= 24) { const d = Math.floor(h / 24), rh = h % 24; return (d === 1 ? 'يوم' : d === 2 ? 'يومين' : d + (d <= 10 ? ' أيام' : ' يوم')) + (rh ? ' و' + hrsWord(rh) : ''); }   // a day or more: days and hours
     return hrsWord(h) + (r ? ' و' + r + ' دقيقة' : ''); };
-  const canEditEv = x => editable() && (isAdmin() || canPlan() || (x.by === S.me && L.prodDay(x.s, H()) === curDay()));
+  const canEditEv = x => editable() && (isAdmin() || canPlan() || (x.by === S.me && (L.prodDay(x.s, H()) === curDay() || (x.t && L.prodDay(x.t, H()) === curDay()))));   // own stop, of today or written today
   function evBox(id) {
     const x = id ? S.dt.find(e => e.id === id) : null, w = FM.w, rs = L.reasonsFor(w.t, SEED), cur = x ? (rs.includes(x.r) ? x.r : L.OTHER) : '';
     modal(`<h3>${esc(w.n)}: ${x ? 'تعديل الوقفة' : 'وقفة حصلت وخلصت'}</h3><label>السبب</label><select class="in" id="er">${x ? '' : '<option value="">اختار السبب…</option>'}${rs.map(r => `<option ${r === cur ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
       <div id="ero" ${cur === L.OTHER ? '' : 'hidden'}><label>اكتب السبب</label><input class="in" id="eot" value="${esc(x ? (rs.includes(x.r) ? x.o || '' : (x.o || x.r)) : '')}"></div>
-      <label>وقف الساعة</label>${timeInput('efr', x ? x.s : null)}<label>رجع الساعة</label>${timeInput('eto', x && x.e ? x.e : null)}
+      <label>وقف الساعة</label>${timeInput('efr', x ? x.s : null)}${dayPick('efr', x ? L.prodDay(x.s, H()) : null)}<label>رجع الساعة</label>${timeInput('eto', x && x.e ? x.e : null)}${dayPick('eto', x && x.e ? L.prodDay(x.e, H()) : null)}
       ${x && !x.e ? '<p class="mute">سيب "رجع الساعة" فاضية لو البير لسه واقف.</p>' : ''}
       <div class="btns" style="margin-top:14px">${x ? '<button class="btn danger" data-act="evdel">امسح</button>' : ''}<button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="evok">حفظ</button></div>`);
-    MEV = id || null; $('#er').onchange = () => { $('#ero').hidden = $('#er').value !== L.OTHER; };
+    MEV = id || null; $('#er').onchange = () => { $('#ero').hidden = $('#er').value !== L.OTHER; }; tWatch('efr', 'eto');
   }
   let MEV = null;
   function evOk() {
@@ -1271,7 +1292,8 @@
     if (r === L.OTHER && !o) return toast('اكتب السبب');
     const fv = readTime('efr'), tv = readTime('eto'); if (fv === null || tv === null) return toast(BADTIME);
     if (!fv) return toast('اكتب وقف الساعة كام');
-    const s0 = tsFromHM(fv), e0 = tv ? tsFromHM(tv) : null;
+    const s0 = tsOn(fv, pickedDay('efr')), e0 = tv ? tsOn(tv, pickedDay('eto')) : null;
+    if (s0 > Date.now() + 60000 || (e0 != null && e0 > Date.now() + 60000)) return toast(FUTURE);
     if (!x && e0 == null) return toast('اكتب رجع الساعة كام. لو البير لسه واقف استخدم "لأ، واقف"');
     if (e0 != null && e0 <= s0) return toast('وقت الرجوع لازم يبقى بعد وقت الوقفة');
     const clash = S.dt.some(e => e.w === w.id && e.id !== MEV && e.s < (e0 == null ? Infinity : e0) && (e.e == null || e.e > s0)); if (clash) return toast('الوقت ده متداخل مع وقفة تانية');
@@ -1285,9 +1307,9 @@
   function downBox(w, pre) {
     const rs = L.reasonsFor(w.t, SEED); DPRE = pre || null;
     modal(`<h3>${esc(w.n)}: البير وقف${pre ? ' للصيانة' : ''}</h3><label>السبب</label><select class="in" id="dr"><option value="">اختار السبب…</option>${rs.map(r => `<option ${pre && pre.r === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
-      <div id="dro" hidden><label>اكتب السبب</label><input class="in" id="dot"></div><label>وقف الساعة كام؟</label>${timeInput('dts', Date.now())}
+      <div id="dro" hidden><label>اكتب السبب</label><input class="in" id="dot"></div><label>وقف الساعة كام؟</label>${timeInput('dts', Date.now())}${dayPick('dts')}
       <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn danger" data-act="downok">سجّل الوقفة</button></div>`);
-    $('#dr').onchange = () => { $('#dro').hidden = $('#dr').value !== L.OTHER; };
+    $('#dr').onchange = () => { $('#dro').hidden = $('#dr').value !== L.OTHER; }; tWatch('dts');
   }
   function downOk() {
     const w = FM.w, r = $('#dr').value, o = ($('#dot') ? $('#dot').value : '').trim();
@@ -1295,18 +1317,20 @@
     if (r === L.OTHER && !o) return toast('اكتب السبب');
     const tv = readTime('dts'); if (tv === null) return toast(BADTIME);
     const mt = DPRE && DPRE.r === r ? DPRE : null;
-    const s = tsFromHM(tv); const e = Object.assign({ id: uid(), w: w.id, s, e: null, r: r === L.OTHER ? 'Other' : r, o: o || (mt ? mt.o : ''), src: mt ? 'maint' : 'tech' }, stampBy()); e.byn = stampBy().byn; if (mt) e.mid = mt.mid;
+    const s = tv ? tsOn(tv, pickedDay('dts')) : Date.now(); if (s > Date.now() + 60000) return toast(FUTURE);
+    if (S.dt.some(x => x.w === w.id && (x.e == null || x.e > s))) return toast('الوقت ده متداخل مع وقفة تانية. عدّل الوقفة اللي قبلها'); const e = Object.assign({ id: uid(), w: w.id, s, e: null, r: r === L.OTHER ? 'Other' : r, o: o || (mt ? mt.o : ''), src: mt ? 'maint' : 'tech' }, stampBy()); e.byn = stampBy().byn; if (mt) e.mid = mt.mid;
     pushEv(e); audit(w.id, w.n, 'داون تايم', '', `${e.r} من ${hm(s)}`, curDay()); save(); closeModal(); renderForm(); toast('اتسجلت الوقفة');
   }
   function upBox(w, intermittent) {
-    modal(`<h3>${esc(w.n)}: ${intermittent ? 'فتحت البير' : 'رجع اشتغل'}</h3><label>الساعة كام؟</label>${timeInput('uts', Date.now())}
+    modal(`<h3>${esc(w.n)}: ${intermittent ? 'فتحت البير' : 'رجع اشتغل'}</h3><label>الساعة كام؟</label>${timeInput('uts', Date.now())}${dayPick('uts')}
       ${intermittent ? '<label>WHSIP قبل الفتح <em class="mute">(اختياري)</em></label><input class="in" id="uws" inputmode="decimal">' : ''}
       <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="upok">تمام</button></div>`);
+    tWatch('uts');
   }
   function upOk() {
     const w = FM.w, e = L.openEvent(S.dt, w.id); if (!e) return closeModal();
     const tv = readTime('uts'); if (tv === null) return toast(BADTIME);
-    let t = tsFromHM(tv); if (t < e.s) return toast('الوقت ده قبل ما البير يقف');
+    const t = tv ? tsOn(tv, pickedDay('uts')) : Date.now(); if (t > Date.now() + 60000) return toast(FUTURE); if (t < e.s) return toast('الوقت ده قبل ما البير يقف');
     e.e = t; const ws = $('#uws') ? L.normNum($('#uws').value) : ''; if (ws) e.ws = ws; mark('e|' + e.id);
     audit(w.id, w.n, 'رجع اشتغل', e.r, hm(t) + (ws ? ` · WHSIP ${ws}` : ''), curDay()); save(); closeModal(); renderForm(); toast('اتسجل');
   }
@@ -1422,7 +1446,7 @@
     const n = v => REP.num(v), u = me();
     return { day: P.day, files: files.map(f => f.name), date: files.map(f => f.date).filter(Boolean).sort().pop() || '', by: S.me, byn: u ? u.name : '', t: Date.now(), stale: P.stale ? 1 : 0, hidStop: P.hidStop,
       close: P.close.map(c => repIt(c.w, c.r.cause || '')), tg: P.tg.map(c => repIt(c.w, `${c.f === 'k' ? 'Factor' : 'التارجت'}: ${c.a || '—'} ← ${c.b || (c.f === 'k' ? 'قراية مباشرة' : '—')}`)),
-      running: P.running.map(c => repIt(c.w, `التقرير ${n(c.r.hrs)} ساعة · في البرنامج واقف من ${L.stamp(c.e.s)}`)),
+      running: P.running.map(c => repIt(c.w, `التقرير ${n(c.r.hrs)} ساعة · كان واقف من ${L.stamp(c.e.s)} · اشتغل ${L.stamp(c.at)}`)),
       hidRun: P.hidRun.map(c => repIt(c.w, `${c.r.st} · ${n(c.r.hrs)} ساعة`)),
       hrs: P.hrs.map(c => repIt(c.w, `التقرير ${c.rep} ساعة · البرنامج ${c.app}${c.r.cause ? ' · ' + c.r.cause : ''}`)),
       types: P.ask.map(a => repIt(a.w, `${repWhy(a)} · ${a.set ? 'اتغير لـ ' + (TYPE_AR[a.set] || a.set) : 'متغيرش، فضل ' + (TYPE_AR[a.from] || a.from)}`)),
@@ -1453,19 +1477,19 @@
     render();
   }
   const REPS = rp => [['close', rp ? 'هيتقفلوا: واقفين في التقرير وشغالين في البرنامج' : 'اتقفلوا: كانوا واقفين في التقرير', 'dn'], ['tg', rp ? 'هيتحدّث التارجت والفاكتور' : 'اتحدّث التارجت والفاكتور', ''],
-    ['running', 'شغالين في التقرير وواقفين في البرنامج', 'w'], ['hidRun', 'شغالين في التقرير ومخفيين عن الفنيين', 'w'], ['hrs', 'ساعات التشغيل مختلفة', 'w'], ['types', 'النوع مختلف', 'w'], ['dup', 'مكرر في الشيت بحالتين أو رقمين: متعملهوش حاجة', 'w'], ['xs', 'الإنتاج والهندسية مختلفين: واقف ولا شغال', 'w'], ['xd', 'فروق تانية بين الإنتاج والهندسية', 'w'],
+    ['running', rp ? 'هيرجعوا شغالين: شغالين في التقرير وواقفين في البرنامج' : 'رجعوا شغالين: كانوا شغالين في التقرير', 'up'], ['hidRun', 'شغالين في التقرير ومخفيين عن الفنيين', 'w'], ['hrs', 'ساعات التشغيل مختلفة', 'w'], ['types', 'النوع مختلف', 'w'], ['dup', 'مكرر في الشيت بحالتين أو رقمين: متعملهوش حاجة', 'w'], ['xs', 'الإنتاج والهندسية مختلفين: واقف ولا شغال', 'w'], ['xd', 'فروق تانية بين الإنتاج والهندسية', 'w'],
     ['keep', 'واقفين في التقرير ومتقفلوش', 'w'], ['miss', 'في التقرير ومش في البرنامج', ''], ['absent', 'ظاهرين للفنيين ومش في التقرير', '']];
   function repHtml(rec, preview) {
     let h = `<div class="card"><h3 style="margin:0 0 4px">تقرير يوم ${esc(arDay(rec.day))}</h3><p class="mute" style="margin:0">${rec.files.map(esc).join('، ')}${preview ? '' : ` · عمله ${esc(rec.byn || '')} ${esc(L.stamp(rec.t))}`}</p>`;
     if (preview) h += `<label class="lab" style="margin-top:10px">يوم الإنتاج اللي التقرير بيتكلم عنه <em>(تقرير الصبح = اليوم اللي قبله من 6 لـ 6)</em></label><input class="in" type="date" id="rpday" value="${rec.day}" max="${curDay()}">`;
     if (rec.stale) h += `<div class="banner">التقرير ده عن يوم فات عليه أكتر من يوم. الآبار اللي هتتقفل هتبقى واقفة من يومه، ولو فيه بير رجع اشتغل من وقتها، الفني يسجل إنه رجع.</div>`;
-    const cnt = k => (rec[k] || []).length, any = ['running', 'hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].some(k => cnt(k));
-    h += `<div class="rchips">${cnt('close') ? `<span class="chip dn"><b>${cnt('close')}</b> ${preview ? 'هيتقفلوا' : 'اتقفلوا'}</span>` : ''}${cnt('tg') ? `<span class="chip"><b>${cnt('tg')}</b> تارجت وفاكتور</span>` : ''}${rec.nt ? `<span class="chip"><b>${rec.nt}</b> تست ${preview ? 'هيتحدّث' : 'اتحدّث'}</span>` : ''}${rec.eng ? `<span class="chip">Rig & Rigless ${esc(rec.eng.slice(5))}</span>` : ''}${any ? `<span class="chip w"><b>${['running', 'hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].reduce((n, k) => n + cnt(k), 0)}</b> فرق محتاج مراجعة</span>` : '<span class="chip">مفيش فرق في الحالة والساعات</span>'}</div>`;
+    const cnt = k => (rec[k] || []).length, any = ['hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].some(k => cnt(k));
+    h += `<div class="rchips">${cnt('close') ? `<span class="chip dn"><b>${cnt('close')}</b> ${preview ? 'هيتقفلوا' : 'اتقفلوا'}</span>` : ''}${cnt('running') ? `<span class="chip up"><b>${cnt('running')}</b> ${preview ? 'هيرجعوا شغالين' : 'رجعوا شغالين'}</span>` : ''}${cnt('tg') ? `<span class="chip"><b>${cnt('tg')}</b> تارجت وفاكتور</span>` : ''}${rec.nt ? `<span class="chip"><b>${rec.nt}</b> تست ${preview ? 'هيتحدّث' : 'اتحدّث'}</span>` : ''}${rec.eng ? `<span class="chip">Rig & Rigless ${esc(rec.eng.slice(5))}</span>` : ''}${any ? `<span class="chip w"><b>${['hidRun', 'hrs', 'types', 'keep', 'dup', 'xs', 'xd'].reduce((n, k) => n + cnt(k), 0)}</b> فرق محتاج مراجعة</span>` : '<span class="chip">مفيش فرق في الحالة والساعات</span>'}</div>`;
     if (rec.gwarn) h += `<div class="banner" style="margin-top:10px">تقرير الإنتاج بيكتب آبار الغاز SI حتى لو شغالة، والبرنامج لسه معندوش قايمة آبار الغاز. ارفع تقرير الهندسية معاه مرة عشان آبار الغاز متتقفلش غلط.</div>`;
     if (rec.gskip) h += `<p class="mute" style="margin:8px 0 0">آبار الغاز حالتها من تقرير الهندسية، فمتقفلتش من تقرير الإنتاج.</p>`;
     if (rec.xdate) h += `<div class="banner" style="margin-top:10px">تقرير الهندسية بتاريخ ${esc(rec.xdate.eng)} وتقرير الإنتاج بتاريخ ${esc(rec.xdate.oil)}. مش نفس اليوم، فمقارنتش بينهم.</div>`;
     if (rec.hidStop) h += `<p class="mute" style="margin:8px 0 0">و${rec.hidStop} بير مخفي عن الفنيين واقف في التقرير، دول متقفلوش في البرنامج.</p>`;
-    h += preview ? `<div class="btns" style="margin-top:12px"><button class="btn" data-act="repclear">إلغاء</button><button class="btn pen" data-act="repok">${cnt('close') || cnt('tg') || rec.nt || rec.eng ? 'اعتمد' : 'احفظ المقارنة'}</button></div>`
+    h += preview ? `<div class="btns" style="margin-top:12px"><button class="btn" data-act="repclear">إلغاء</button><button class="btn pen" data-act="repok">${cnt('close') || cnt('running') || cnt('tg') || rec.nt || rec.eng ? 'اعتمد' : 'احفظ المقارنة'}</button></div>`
       : `<button class="btn wa wide" style="margin-top:12px" data-act="repshare" data-d="${rec.day}">${ic('share')} ابعت المقارنة</button>`;
     h += '</div>';
     if (preview && (rec.ask || []).length) h += `<section class="sec rsec w"><h3>نوعه في الشيت غير البرنامج: اتغير؟ <small>${rec.ask.length}</small></h3>
@@ -1498,6 +1522,8 @@
     if (d) {
       if (days.length > 1) h += `<div class="stabs">${days.slice(0, 7).map(x => `<button class="stab ${x === d ? 'on' : ''}" data-act="go" data-v="rep" data-d="${x}">${esc(x.slice(5))}</button>`).join('')}</div>`;
       h += repHtml(S.reps[d], false);
+      if (isAdmin()) h += `<div class="card"><h3 style="margin:0 0 4px">مسح التقارير</h3><p class="mute" style="margin:0 0 10px">بيتمسح التقرير والمقارنة بس. الآبار اللي اتقفلت أو رجعت شغالة منه بتفضل زي ما هي.</p>
+        <div class="btns"><button class="btn" data-act="repdel" data-d="${d}">امسح تقرير ${esc(d.slice(5))}</button>${days.length > 1 ? `<button class="btn" data-act="repdel" data-d="old">امسح القديم كله (${days.length - 1})</button>` : ''}</div></div>`;
     }
     return h + '</main>' + tabs('settings');
   }
@@ -1509,11 +1535,22 @@
     const by = { by: S.me, byn: (me() || {}).name || '', t: Date.now() };
     S.tests = S.tests || {}; for (const x of P.tests) { S.tests[x.w.id] = Object.assign({ d: x.d, bopd: x.bopd, bfpd: x.bfpd, wc: x.wc, gas: x.gas, src: x.src, day: P.day }, x.gw ? { gw: 1 } : {}, by); mark('wt|' + x.w.id); }
     if (P.eng) { S.eng = S.eng || {}; S.eng[P.eng.d] = Object.assign({}, P.eng, by); mark('en|' + P.eng.d); for (const k of Object.keys(S.eng).sort().slice(0, -30)) delete S.eng[k]; }
-    for (const { w, r } of P.close) { const e = Object.assign({ id: uid(), w: w.id, s: s0, e: null, r: r.cause || 'SI', o: 'تقرير الإنتاج ' + lab, src: 'rep' }, stampBy()); pushEv(e); audit(w.id, w.n, 'داون تايم', '', 'واقف في تقرير ' + lab, curDay()); }
+    for (const { w, r, from } of P.close) { const e = Object.assign({ id: uid(), w: w.id, s: from || s0, e: null, r: r.cause || 'SI', o: '', src: 'rep', rd: lab }, stampBy()); pushEv(e); audit(w.id, w.n, 'داون تايم', '', 'واقف في تقرير ' + lab, curDay()); }
+    for (const { w, e, at } of P.running) { const x = S.dt.find(y => y.id === e.id); if (!x || x.e != null) continue; x.e = Math.max(at, x.s); mark('e|' + x.id); audit(w.id, w.n, 'رجع اشتغل', x.r, 'شغال في تقرير ' + lab + ' · ' + hm(x.e), curDay()); }
     for (const c of P.tg) setEdit(c.w.id, c.f, c.b || 0);
     rec.t = Date.now(); S.reps = S.reps || {}; S.reps[P.day] = rec; mark('rp|' + P.day); S.ui.rpSeen = rec.t;
     save(); RP = null; V.rpd = P.day; render(); window.scrollTo(0, 0); SYNC.run(false);
-    toast(rec.close.length || rec.tg.length ? `اتقفل ${rec.close.length} بير${rec.tg.length ? ` واتحدّث ${rec.tg.length} تارجت وفاكتور` : ''}` : 'اتحفظت المقارنة');
+    toast(rec.close.length || rec.running.length || rec.tg.length ? [rec.close.length ? `اتقفل ${rec.close.length} بير` : '', rec.running.length ? `رجع ${rec.running.length} بير شغال` : '', rec.tg.length ? `اتحدّث ${rec.tg.length} تارجت وفاكتور` : ''].filter(Boolean).join(' و') : 'اتحفظت المقارنة');
+  }
+  // the admin deletes saved reports (the report and its comparison); the stops made from them stay
+  function repDel(which) {
+    if (!isAdmin()) return;
+    const days = Object.keys(S.reps || {}).sort().reverse(), del = which === 'old' ? days.slice(1) : days.filter(x => x === which); if (!del.length) return;
+    confirmBox(del.length > 1 ? `تمسح ${del.length} تقرير قديم ومقارناتهم؟ آخر تقرير (${days[0].slice(5)}) هيفضل.` : `تمسح تقرير ${del[0].slice(5)} ومقارنته؟`, 'امسح', () => {
+      for (const x of del) { delete S.reps[x]; mark('rp|' + x); }
+      audit('', 'التقارير', 'مسح تقرير', '', del.length > 1 ? `${del.length} تقرير (${del[del.length - 1]} لـ ${del[0]})` : del[0], curDay());
+      save(); V.rpd = null; render(); SYNC.run(false); toast(del.length > 1 ? `اتمسح ${del.length} تقرير` : 'اتمسح التقرير');
+    });
   }
   function repText(rec) {
     const sec = (t, a) => a && a.length ? `\n\n*${t} (${a.length})*\n` + a.map(x => `- ${x.n}${x.x ? ' · ' + x.x : ''}`).join('\n') : '';
@@ -1744,6 +1781,7 @@
         g.querySelectorAll('button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
         if (box.checked !== v) { box.checked = v; box.dispatchEvent(new Event('change', { bubbles: true })); } return; }
       case 'repshare': return repShare(b.dataset.d);
+      case 'repdel': return repDel(b.dataset.d);
       case 'repday': return;
       case 'syncnow': { document.querySelectorAll('[data-sync]').forEach(el => el.innerHTML = '<span class="sy run">بيبعت…</span>'); SYNC.run(true); return; }
       case 'surlsave': {
@@ -1799,7 +1837,8 @@
       case 'evadd': return evBox(null);
       case 'evedit': return evBox(b.dataset.e);
       case 'evok': return evOk();
-      case 'ampm': { b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); const tin = b.closest('.tin[data-chp]'); if (tin && readTime(tin.id)) saveChemTime(tin); return; }
+      case 'ampm': { b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); const tin = b.closest('.tin[data-chp]'); if (tin && readTime(tin.id)) saveChemTime(tin); const tp = b.closest('.tin'); if (tp) tPrev(tp.id); return; }
+      case 'dpick': { b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); return tPrev(b.parentNode.id.slice(0, -1)); }
       case 'evdel': return evDel();
       case 'intclose': return intClose();
       case 'mclose': return closeModal();

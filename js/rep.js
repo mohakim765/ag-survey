@@ -161,10 +161,12 @@
               as stopped): nothing is closed until the engineer says "close it" (o.xs = { wellId: 'close' })
      xd     - other differences between the two: hours, lift gas, lift type, a well only in the engineering report
      xdate  - the two reports are not of the same day: they are not compared
-     close  - stopped in the report, running in the app, shown to the technicians: they get a stop from the start of the report's day
-     keep   - stopped in the report, but the app has the well running again after the report's day began: not closed
+     close  - stopped in the report, running in the app, shown to the technicians: they get a stop from the start of the report's
+              day, or from the end of the well's last stop in that day (from)
+     keep   - stopped in the report, but the app has the well running again after the report's day ended (newer): not closed
      (an older report still closes: a well that ran again since then is set running by whoever sees it; stale only warns)
-     running- running in the report (hours > 0), stopped in the app
+     running- running in the report (hours > 0), stopped in the app since before the report's day ended: the stop ends (at), at
+              the start of the report's day (or when it stopped) plus the hours the report says it was down
      hidRun - running in the report, hidden from the technicians
      hrs    - hours online in the report and in the app differ by an hour or more (that day)
      tg     - target / factor changes (WIW: REQ INJ QTY; Gas Lift: Opt. INJ. GAS and Factor)
@@ -255,12 +257,15 @@
     const closeOrKeep = (w, r) => {
       if (w.hid) { P.hidStop++; return; }
       const later = o.dt.filter(e => e.w === w.id && e.e != null && e.e > s0).sort((a, b) => b.e - a.e)[0];
-      if (later) P.keep.push({ w, r, e: later }); else P.close.push({ w, r });
+      if (later && later.e > e0) P.keep.push({ w, r, e: later }); else P.close.push({ w, r, from: later ? later.e : s0 });
     };
     for (const { w, r } of st.values()) {
       const c = xsm.get(w.id), stop = c ? c.set === 'close' : isStop(r), hrs = num(r.hrs), open = L.openEvent(o.dt, w.id);
       if (stop && !open) closeOrKeep(w, c && !c.prodStop ? c.re : r);
-      else if (!stop && hrs > 0) { if (open && open.s < e0 && !w.hid) P.running.push({ w, r, e: open }); if (w.hid) P.hidRun.push({ w, r }); }
+      else if (!stop && hrs > 0) {
+        if (open && open.s < e0 && !w.hid) { const at = Math.min(e0, o.now, Math.max(open.s, s0) + Math.max(0, 24 - Math.min(hrs, 24)) * 3600000); P.running.push({ w, r, e: open, at: Math.max(at, open.s) }); }
+        if (w.hid) P.hidRun.push({ w, r });
+      }
     }
     // stopped only in the engineering report (on a rig), not in the production report: closed when the engineer says so
     for (const c of P.xs) if (!c.rp && c.set === 'close' && !L.openEvent(o.dt, c.w.id)) closeOrKeep(c.w, c.re);
@@ -295,7 +300,8 @@
     }
     // hours online on the report's day, with the stops that are about to be added
     if (e0 <= o.now) {
-      const dt = o.dt.concat(P.close.map(x => ({ w: x.w.id, s: s0, e: null })));
+      const ends = new Map(P.running.map(x => [x.e, x.at]));
+      const dt = o.dt.map(e => ends.has(e) ? Object.assign({}, e, { e: ends.get(e) }) : e).concat(P.close.map(x => ({ w: x.w.id, s: x.from || s0, e: null })));
       for (const { w, r } of st.values()) { if (w.hid) continue; const hrs = num(r.hrs); if (hrs == null) continue; const app = L.uptime(dt, w.id, o.day, o.h, o.now).up; if (Math.abs(app - hrs) >= 1) P.hrs.push({ w, r, app, rep: hrs }); }
     }
     // targets and factors, only from tables of the well's type; two different values for one well change nothing
