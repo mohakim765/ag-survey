@@ -25,7 +25,7 @@
   screen(link);
 
   function start() {
-    for (const f of ['lib', 'xlsx', 'xl', 'rep', 'pdf', 'sync', 'app']) { const s = document.createElement('script'); s.src = 'js/' + f + '.js'; s.async = false; document.body.appendChild(s); }
+    for (const f of ['lib', 'xlsx', 'xl', 'rep', 'pdf', 'av', 'sync', 'app']) { const s = document.createElement('script'); s.src = 'js/' + f + '.js'; s.async = false; document.body.appendChild(s); }
   }
   function shell(body) {
     app.innerHTML = `<main class="wrap"><img class="logoimg" src="img/icon-192.png" alt=""><h1 class="center" style="margin:0" dir="ltr">AG Survey</h1>${body}

@@ -319,6 +319,12 @@
       const b = c.v[0]; if (Math.abs((c.a ?? 0) - (b ?? 0)) > 1e-9) P.tg.push({ w: c.w, f: c.f, a: c.a ?? null, b });
     }
     if (oil.length) P.absent = wells.filter(w => !w.hid && !by.has(w.id));
+    /* each well's hours and downtime cause as the reports have them (what Avocet's Flow Time and Downtime type take): by app
+       well, and by the report's own name for the wells the app does not have. Where from: p production report, g the
+       engineering report's gas tab (gas wells), e its tests tab. The injection the report says (act) is kept to check against. */
+    const whOf = r => [num(r.hrs), r.cause || '', r.fk === 'eng' ? (r.gt ? 'g' : 'e') : 'p', num(r.act)];
+    P.wh = {}; for (const { w, r } of st.values()) P.wh[w.id] = whOf(r);
+    P.whn = {}; for (const r of miss) if (hasSt(r)) P.whn[key(r.n)] = whOf(r);
     return P;
   }
   root.REP = { toks, key, base, matcher, sections, extract, fileDate, serialDay, STOP, TYPE, num, plan, tableOf, desc, rigWells, engTests, engAct };

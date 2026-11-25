@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.20';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.21';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1373,7 +1373,29 @@
       <button class="btn wide" style="margin-top:8px" data-act="xlsx">${ic('dl')} طلّع ملف Excel</button></div>
       <p class="mute">الـ PDF فيه صفحة لكل منطقة بنفس شكل ورقة السيرفاي: جدول لكل نوع بير، والمانيفولد، والديزل والكيميكال، والداون تايم. الصور نفس الصفحات بس كل صفحة صورة، أسهل تتفتح على الموبايل. لما تدوس، اختار واتساب من القايمة اللي هتظهر.</p>
       <p class="mute">الـ Excel فيه تابة لكل نوع بير، وتابة للديزل بنفس شكل ورقة الديزل، والكيميكال، والداون تايم وساعات التشغيل، والعينات${isAdmin() ? '، وسجل التعديلات' : ''}.</p>`;
+    if (canPlan() && SEED.avocet) h += `<div class="card"><h3 style="margin:0 0 6px">شيت Avocet</h3>
+      <label class="lab">يوم الإنتاج</label><input class="in" type="date" id="avd" value="${avDay()}" max="${d}">
+      <p class="avs" id="avs">${avStatus(avDay())}</p>
+      <button class="btn wide" data-act="avocet">${ic('dl')} طلّع شيت Avocet</button>
+      <p class="mute" style="margin-bottom:0">نفس تابات شيت السيرفاي القديم اللي بتدخل Avocet، بنفس الأعمدة وترتيب الآبار، ومعاها تابة المانيفولدات. البير اللي ملوش قراية في اليوم ده بياخد آخر قراية ليه، وبتبقى صفرا. الخانة الحمرا ناقصة لازم تتراجع. تابة «مراجعة» فيها كل خانة صفرا أو حمرا وجت منين.</p></div>`;
     return h + '</main>' + tabs('export');
+  }
+  // the Avocet sheet: for the production day that ended (the report of a day comes the next morning)
+  const avDay = () => V.avd || L.addDays(curDay(), -1);
+  function avStatus(d) {
+    const rec = (S.reps || {})[d];
+    let s = rec && rec.wh ? `<b class="ok">تقرير الإنتاج بتاع اليوم ده اتعمد</b>: ساعات التشغيل منه.` : `<b class="warn">تقرير الإنتاج بتاع اليوم ده لسه متعمدش</b>: ساعات التشغيل هتطلع من وقفات البرنامج. اعمد التقرير الأول عشان الساعات تبقى زي التقرير.`;
+    if (d >= curDay()) s += '<br>اليوم ده لسه مخلصش (بيخلص الساعة ' + H() + ' الصبح).';
+    return s;
+  }
+  async function doAvocet() {
+    const d = ($('#avd') && $('#avd').value) || avDay();
+    if (!/^\d{4}-\d\d-\d\d$/.test(d) || d > curDay()) return toast('راجع اليوم');
+    let res;
+    try { res = AV.build({ S, A: SEED.avocet, L, wells: WELLS, day: d, H: H(), now: Date.now() }); }
+    catch (e) { return toast('حصلت مشكلة في شيت Avocet: ' + (e.message || e)); }
+    const r = await shareFile(`Avocet_${d}.xlsx`, XLSX.buildXlsx(res.sheets), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    if (r === 'ok' && res.stats.r) toast(`فيه ${res.stats.r} خانة حمرا: راجعها في تابة «مراجعة»`);
   }
   function exportOpts() {
     const from = $('#ef') ? $('#ef').value : curDay(), to = $('#et') ? $('#et').value : curDay(), areas = [...document.querySelectorAll('[data-ea]:checked')].map(x => x.dataset.ea);
@@ -1546,6 +1568,10 @@
     for (const { w, r, from } of P.close) { const e = Object.assign({ id: uid(), w: w.id, s: from || s0, e: null, r: r.cause || 'SI', o: '', src: 'rep', rd: lab }, stampBy()); pushEv(e); audit(w.id, w.n, 'داون تايم', '', 'واقف في تقرير ' + lab, curDay()); }
     for (const { w, e, at } of P.running) { const x = S.dt.find(y => y.id === e.id); if (!x || x.e != null) continue; x.e = Math.max(at, x.s); mark('e|' + x.id); audit(w.id, w.n, 'رجع اشتغل', x.r, 'شغال في تقرير ' + lab + ' · ' + hm(x.e), curDay()); }
     for (const c of P.tg) setEdit(c.w.id, c.f, c.b || 0);
+    // hours and causes for Avocet: kept from an earlier approval of the same day unless this one has them from as good a source
+    // (the gas tab before the production report before the engineering tests tab)
+    const old = (S.reps || {})[P.day], rank = x => ({ g: 3, p: 2, e: 1 })[x && x[2]] || 0, merge = (a, b) => { const o = Object.assign({}, a || {}); for (const k in b || {}) if (rank(b[k]) >= rank(o[k])) o[k] = b[k]; return o; };
+    rec.wh = merge(old && old.wh, P.wh); rec.whn = merge(old && old.whn, P.whn);
     rec.t = Date.now(); S.reps = S.reps || {}; S.reps[P.day] = rec; mark('rp|' + P.day); S.ui.rpSeen = rec.t;
     save(); RP = null; V.rpd = P.day; render(); window.scrollTo(0, 0); SYNC.run(false);
     toast(rec.close.length || rec.running.length || rec.tg.length ? [rec.close.length ? `اتقفل ${rec.close.length} بير` : '', rec.running.length ? `رجع ${rec.running.length} بير شغال` : '', rec.tg.length ? `اتحدّث ${rec.tg.length} تارجت وفاكتور` : ''].filter(Boolean).join(' و') : 'اتحفظت المقارنة');
@@ -1881,6 +1907,7 @@
       case 'sk': V.sk = b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); return;
       case 'ssave': return saveSample();
       case 'xlsx': return doExport();
+      case 'avocet': return canPlan() ? doAvocet() : null;
       case 'backup': return backup();
       case 'aarea': V.a = b.dataset.a; V.q = ''; return render();
       case 'cfgsave': {
@@ -1939,6 +1966,7 @@
     if (t.dataset.type) { if (!canWells()) return; setEdit(t.dataset.type, 't', t.value); return toast('اتغير النوع'); }
     if (t.id === 'rpf') return repRead(t.files);
     if (t.id === 'rpday') { if (RP) { RP.day = t.value || RP.day; repPlanNow(); render(); } return; }
+    if (t.id === 'avd') { V.avd = t.value || null; const s = $('#avs'); if (s) s.innerHTML = avStatus(avDay()); return; }
     if (t.dataset.task) { const aid = t.dataset.a || V.a, pl = planObj(viewDay(), aid), x = pl.tasks.find(q => q.id === t.dataset.task); if (!x) return; x.done = t.checked ? stampBy() : null; mark(`pt|${viewDay()}|${aid}|${x.id}`); audit('plan', areaOf(aid).n, 'مهمة', t.checked ? '' : 'خلصت', t.checked ? 'خلصت: ' + x.x : x.x, viewDay()); save(); return render(); }
     if (t.id === 'jk') { const w = $('#jkw'); if (w) { w.hidden = t.value !== '__o'; if (!w.hidden) $('#jko').focus(); } return; }
     if (t.dataset.role) { const u = S.users[t.dataset.role]; if (!u || !isAdmin() || u.u === ADM() || !ROLES.some(r => r[0] === t.value)) return; audit('user', u.u, 'الوظيفة', roleName(u), (ROLES.find(r => r[0] === t.value) || ROLES[0])[1], curDay()); u.role = t.value; mark('u|' + u.u); save(); SYNC.run(false); return toast('اتغيرت الوظيفة'); }
