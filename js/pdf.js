@@ -115,7 +115,7 @@
     const notes = ws.filter(w => D.r[w.id] && D.r[w.id].n).map(w => [w.n, D.r[w.id].n]);
     if (notes.length) P.table('Comments', [{ h: 'Well', w: 1.4 }, { h: 'Comment', w: 6 }], notes);
     const sm = S.samples.filter(s => s.day === day && (s.w ? ws.find(w => w.id === s.w) : false)).sort((x, y) => x.ts - y.ts);
-    if (sm.length) P.table('Samples', [{ h: 'Time', w: 1 }, { h: 'Point', w: 2.5 }, { h: 'Sample', w: 1.2 }, { h: 'Technician', w: 2.5 }], sm.map(s => [L.hhmm(s.ts), ws.find(w => w.id === s.w).n, s.kind === 'W' ? 'Water' : 'Oil', s.byn || '']));
+    if (sm.length) P.table('Samples', [{ h: 'Time', w: 1 }, { h: 'Point', w: 2.5 }, { h: 'Sample', w: 1.2 }, { h: 'Technician', w: 2.5 }], sm.map(s => [L.hhmm(s.ts), ws.find(w => w.id === s.w).n, ({ W: 'Water', D: 'Diesel' })[s.kind] || 'Oil', s.byn || '']));
     return P.done();
   }
 

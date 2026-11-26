@@ -213,7 +213,7 @@
     if (ho.length > 1) sheets.push({ name: 'Hours online', rows: ho, widths: [12, 14, 18, 7, 12, 11, 24] });
     // samples
     const sm = [['Prod. Day', 'Time', 'Point', 'Area', 'Sample', 'Taken by', 'Technician', 'Comment']];
-    for (const s of S.samples) { if (!inRange(s.day, from, to)) continue; const w = byId[s.w]; if (w && !sel.has(w.a)) continue; sm.push([{ date: s.day }, hhmm(s.ts), w ? w.n : s.pt, w ? AREA_N(seed, w.a) : '', s.kind === 'W' ? 'Water' : 'Oil', s.who, s.byn || '', s.n || '']); }
+    for (const s of S.samples) { if (!inRange(s.day, from, to)) continue; const w = byId[s.w]; if (w && !sel.has(w.a)) continue; sm.push([{ date: s.day }, hhmm(s.ts), w ? w.n : s.pt, w ? AREA_N(seed, w.a) : '', ({ W: 'Water', D: 'Diesel' })[s.kind] || 'Oil', s.who, s.byn || '', s.n || '']); }
     if (sm.length > 1) sheets.push({ name: 'Samples', rows: sm, widths: [12, 7, 22, 14, 8, 14, 16, 30] });
     if (opt.audit) {
       const au = [['When', 'User', 'Prod. Day', 'What', 'Field', 'Old', 'New', 'Reason']];

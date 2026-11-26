@@ -41,6 +41,13 @@
     return { open: rot[open], shut: rot[open === 'a' ? 'b' : 'a'], ko: open, ks: open === 'a' ? 'b' : 'a' };
   }
 
+  // the oil truck of a well's EPF every other day: mtk { on, ref: day, yes (a truck that day), bbl }
+  function truckOn(mtk, day) {
+    if (!mtk || !mtk.on || !mtk.ref) return null;
+    const k = Math.round((Date.parse(day + 'T12:00:00Z') - Date.parse(mtk.ref + 'T12:00:00Z')) / 864e5);
+    return ((k % 2) + 2) % 2 === 0 ? !!mtk.yes : !mtk.yes;
+  }
+
   // ---------------- the deferred production: the day's downtime against yesterday's ----------------
   function deferred(o) {
     const { S, L, wells, day, H, now, testOf } = o, yd = L.addDays(day, -1);
@@ -59,6 +66,8 @@
       if (ow.length) rows.push({ n: names(ow), dt: 12, r: 'Scheduled Intermittent Production [Back to production].', diff: so == null ? null : so });
       if (sw.length) rows.push({ n: names(sw), dt: 24, r: 'Scheduled Intermittent Production. [Still Down].', diff: ss == null ? null : -ss });
     }
+    const tk = truckOn(o.mtk, day), tn = o.fix && o.fix.truck && o.fix.truck.n;
+    if (tk != null && tn) rows.push({ n: tn, dt: 0, r: `Received ${tk ? 'one' : 'no'} oil truck today from the well’s EPF.`, diff: typeof o.mtk.bbl === 'number' ? (tk ? o.mtk.bbl : -o.mtk.bbl) : null });
     const down = [], back = [];
     for (const w of wells) {
       if (w.hid || w.t === 'WSW' || w.t === 'WIW' || inRot.has(w.id)) continue;
@@ -101,10 +110,14 @@
     return out;
   }
 
-  // a standing comment's values: {p:POINT:LINE} the day's reading of a pressure point, {t:POINT} the time it was read
+  // a standing comment's values: {p:POINT:LINE} the day's reading of a pressure point, {d:POINT:LINE} its change against
+  // yesterday's (" (+7)"), {t:POINT} the time it was read, {truck} one / no (the EPF's oil truck that day)
   function fill(t, o) {
-    const D = (o.S.days || {})[o.day] || {}, P = D.p || {};
-    return String(t).replace(/\{p:([^:}]+):([^}]+)\}/g, (m, id, hd) => { const x = P[id], v = x && x.h ? x.h[hd] : null; return v != null && v !== '' ? String(v) : '**'; })
+    const D = (o.S.days || {})[o.day] || {}, P = D.p || {}, Y = ((o.S.days || {})[o.L.addDays(o.day, -1)] || {}).p || {};
+    const pv = (Q, id, hd) => { const x = Q[id], v = x && x.h ? String(x.h[hd] ?? '').trim() : ''; return /^-?\d+(\.\d+)?$/.test(v) ? +v : null; };
+    const tk = truckOn(o.mtk, o.day);
+    return String(t).replace(/\{d:([^:}]+):([^}]+)\}/g, (m, id, hd) => { const a = pv(P, id, hd), b = pv(Y, id, hd); if (a == null || b == null || a === b) return ''; const x = Math.round((a - b) * 10) / 10; return ` (${x > 0 ? '+' : ''}${x})`; })
+      .replace(/\{truck\}/g, tk == null ? '**' : tk ? 'one' : 'no').replace(/\{p:([^:}]+):([^}]+)\}/g, (m, id, hd) => { const x = P[id], v = x && x.h ? x.h[hd] : null; return v != null && v !== '' ? String(v) : '**'; })
       .replace(/\{t:([^}]+)\}/g, (m, id) => { const x = P[id]; if (!x || !x.t || !x.h || !Object.keys(x.h).length) return '09:00 AM'; const d = new Date(x.t), h = d.getHours(), mi = d.getMinutes(); return `${String(h % 12 || 12).padStart(2, '0')}:${String(mi).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; });
   }
 
@@ -192,10 +205,10 @@
     const wf = wfHtml(W, day);
     h += title('Water Flood System:') + wf.html;
     h += title('Samples:');
-    const oil = sn('O'), water = sn('W');
+    const oil = sn('O'), water = sn('W'), diesel = sn('D');
     h += line(`Collected oil samples from wells: ( ${oil ? esc(oil) : hl('**')} )`);
     if (water) h += line(`Collected water samples from wells: ( ${esc(water)} )`);
-    h += line(`Collected diesel samples from wells: ( ${hl('**')} )`);
+    h += line(`Collected diesel samples from wells: ( ${diesel ? esc(diesel) : hl('**')} )`);
     h += title('Daily Production Survey:') + line('See the daily production survey report.');
     h += `<p style="margin:18px 0 0;${F}font-size:11.5pt;font-weight:bold;color:#294B5C">Production Eng. Dept.<br>Eastern Area - AG Field.</p></div>`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>AG Production Activity ${dmy(day)}</title></head><body style="margin:8px">${h}</body></html>`;
@@ -216,6 +229,6 @@
     return hd.join('\r\n') + '\r\n\r\n' + b64(m.html) + '\r\n';
   }
 
-  const api = { build, eml, deferred, jobs, names, rotOn, dmy };
+  const api = { build, eml, deferred, jobs, names, rotOn, truckOn, dmy };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.PMAIL = api;
 })(typeof self !== 'undefined' ? self : this);

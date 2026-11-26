@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.32';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.33';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -58,6 +58,7 @@
   const canWells = canPlan;   // المهندس: كل حاجة في الآبار (بير جديد، النوع، الخانات الإجبارية، الإعدادات، التقارير، تعديل الأيام اللي فاتت). الأدمن زيادة: الناس والمستخدمين والربط بالشيت
   const planFor = (day, aid) => (S.plan && S.plan[day + '|' + aid]) || { staff: [], maint: [], work: [], tasks: [] };
   function planObj(day, aid) { S.plan = S.plan || {}; return S.plan[day + '|' + aid] || (S.plan[day + '|' + aid] = { staff: [], maint: [], work: [], tasks: [] }); }
+  const SKN = { O: 'زيت', W: 'مية', D: 'ديزل' };   // the kinds of sample
   const MAINT = { stop: 'صيانة مولد (البير هيقف)', sync: 'صيانة مولد Sync (البير مش هيقف)', other: 'صيانة تانية' };
   const WORK = ['بلوف', 'Slickline', 'Wireline', 'Coil Tubing', 'حفار', 'شغل تاني'];
   // a person in the staff list is kept as "name" or "name · phone" (the sheet shows it as it is)
@@ -430,7 +431,7 @@
     let h = `<header class="top slim"><div class="wrap"><button class="ib" data-act="go" data-v="home" aria-label="رجوع">${ic('back')}</button><div class="tt"><h1>${esc(a.n)}</h1></div>
       <button class="fbtn ${tab === 'dt' ? 'on' : ''}" data-act="stab" data-v="dt">${ic('list')}المتابعة${nu ? `<b class="nbdg">${nu}</b>` : todo ? `<span class="fcnt">${todo}</span>` : ''}</button>${isAdmin() ? '<span class="tag" style="color:#f2f3f5;border-color:#f2f3f5">أدمن</span>' : ''}</div></header><main class="wrap">`;
     const tile = (k, label, big, sub) => `<button class="atab ${tab === k ? 'on' : ''}" data-act="stab" data-v="${k}"><span class="al">${label}</span><span class="ab">${big}</span>${sub ? `<span class="as">${sub}</span>` : ''}</button>`;
-    h += `<div class="atabs">${tile('wells', 'الآبار', `${st.done}/${st.total}`, st.down ? `${st.down} واقف` : '')}${tile('samples', 'العينات', String(smp.length), smp.length ? `زيت ${smp.length - sW} · مية ${sW}` : 'مفيش لسه')}${tile('press', 'المانيفولد', nP ? `${pDone}/${nP}` : '—', '')}${tile('diesel', nC ? 'الديزل والكيميكال' : 'الديزل', nT + nC ? `${tDone + cDone}/${nT + nC}` : '—', [st.dl ? `${st.dl} ديزل تحت ${S.cfg.dieselMin}%` : '', st.cl ? `${st.cl} كيميكال ناقص` : ''].filter(Boolean).join(' · '))}</div>`;
+    h += `<div class="atabs">${tile('wells', 'الآبار', `${st.done}/${st.total}`, st.down ? `${st.down} واقف` : '')}${tile('samples', 'العينات', String(smp.length), smp.length ? Object.entries(SKN).map(([k, n]) => [n, smp.filter(s => (s.kind || 'O') === k).length]).filter(([n, c], i) => c || i < 2).map(([n, c]) => `${n} ${c}`).join(' · ') : 'مفيش لسه')}${tile('press', 'المانيفولد', nP ? `${pDone}/${nP}` : '—', '')}${tile('diesel', nC ? 'الديزل والكيميكال' : 'الديزل', nT + nC ? `${tDone + cDone}/${nT + nC}` : '—', [st.dl ? `${st.dl} ديزل تحت ${S.cfg.dieselMin}%` : '', st.cl ? `${st.cl} كيميكال ناقص` : ''].filter(Boolean).join(' · '))}</div>`;
     if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للمهندس والأدمن بس.</div>`;
     if (tab === 'wells') h += areaWells(a, d);
     else if (tab === 'press') h += areaPress(a, d);
@@ -987,10 +988,10 @@
     let h = '<div class="card" style="margin-top:12px"><h3 style="margin:0 0 8px">عينة جديدة</h3>';
     h += `<label class="lab">البير أو النقطة</label>${sel ? `<div class="picked">${tchip(sel.t)} <b>${esc(sel.n)}</b><button class="btn sm" data-act="sclear">غيّر</button></div>`
       : `<input class="in" id="sq" placeholder="ابحث باسم البير، زي 13 أو NEAG" value="${esc(V.sq || '')}" autocomplete="off" dir="ltr"><div id="sres">${sampleResults(a.id)}</div>`}
-      <label class="lab" style="margin-top:12px">نوع العينة</label><div class="seg" id="sk"><button type="button" class="${V.sk === 'W' ? '' : 'on'}" data-act="sk" data-v="O">زيت</button><button type="button" class="${V.sk === 'W' ? 'on' : ''}" data-act="sk" data-v="W">مية</button></div>
+      <label class="lab" style="margin-top:12px">نوع العينة</label><div class="seg" id="sk">${Object.entries(SKN).map(([k, n]) => `<button type="button" class="${(V.sk || 'O') === k ? 'on' : ''}" data-act="sk" data-v="${k}">${n}</button>`).join('')}</div>
       <label class="lab" style="margin-top:12px">كومنت</label><input class="in" id="sn" placeholder="اختياري">
       <p class="mute">الوقت واسمك بيتسجلوا لوحدهم.</p><button class="btn pen wide" data-act="ssave" ${editable() ? '' : 'disabled'}>سجّل العينة</button></div>`;
-    h += `<p class="h2">عينات النهارده (${list.length})</p><div class="card">${list.length ? list.map(s => { const w = WBY[s.w]; return `<div class="lrow"><span class="nm">${esc(w ? w.n : s.pt)}<small>${s.kind === 'W' ? 'مية' : 'زيت'} · ${hmA(s.ts)} · ${esc(s.byn || '')}${s.n ? ' · ' + esc(s.n) : ''}</small></span></div>`; }).join('') : '<p class="empty">مفيش عينات لسه</p>'}</div>`;
+    h += `<p class="h2">عينات النهارده (${list.length})</p><div class="card">${list.length ? list.map(s => { const w = WBY[s.w]; return `<div class="lrow"><span class="nm">${esc(w ? w.n : s.pt)}<small>${SKN[s.kind] || 'زيت'} · ${hmA(s.ts)} · ${esc(s.byn || '')}${s.n ? ' · ' + esc(s.n) : ''}</small></span></div>`; }).join('') : '<p class="empty">مفيش عينات لسه</p>'}</div>`;
     return h;
   }
   // ---------------- a well picker: the search box and the list under it, always both ----------------
@@ -1441,7 +1442,7 @@
       <label class="lab">يوم الإنتاج</label><input class="in" type="date" id="pmd" value="${pmDay()}" max="${d}">
       <p class="avs" id="pms">${pmStatus(pmDay())}</p>
       <button class="btn pen wide" data-act="pmail">${ic('share')} اعمل الميل</button>
-      <div class="btns" style="margin-top:8px"><button class="btn" data-act="irot">الآبار المتقطعة</button><button class="btn" data-act="wfx">شبكة الـ WF</button></div>
+      <div class="btns" style="margin-top:8px"><button class="btn" data-act="irot">الآبار المتقطعة</button>${SEED.pmfix && SEED.pmfix.truck ? '<button class="btn" data-act="mtk">التركة</button>' : ''}<button class="btn" data-act="wfx">شبكة الـ WF</button></div>
       <p class="mute" style="margin-bottom:0">بنفس شكل ميل «AG Production Activity»: شغل المهندس على الآبار، والمتقطع، والـ Deferred Production، وجدول شبكة الـ WF، والعينات. اللي البرنامج مش عارفه بيفضل ** بالأصفر، تكمّله في Outlook.</p></div>`;
     return h + '</main>' + tabs('export');
   }
@@ -1653,13 +1654,16 @@
   // a computer (the web version with a mouse and a wide screen): the email is downloaded and opened in Outlook there
   const pmDesk = () => !Cap && !!window.matchMedia && matchMedia('(pointer:fine)').matches && window.innerWidth >= 900;
   const rotNow = () => S.cfg.irot || SEED.irot || null;
+  const mtkNow = () => S.cfg.mtk || SEED.mtk || null;   // the EPF's oil truck every other day (the email's line and Deferred row)
   // the water-flood network: the engineer's WF sheet (the seed), with the design capacities and wells supported he changed
   const wfNet = () => { const n = SEED.wf || { src: [], inj: [] }, x = S.cfg.wfx || {}, dd = x.d || {}, ss = x.s || {};
     return { src: n.src.map(([id, v]) => [id, dd[id] != null ? dd[id] : v]), inj: n.inj.map(([id, s, sup]) => [id, s, ss[id] != null ? ss[id] : sup]) }; };
-  const pmBuild = d => PMAIL.build({ S, L, AV, A: SEED.avocet, ref: SEED.ref, wells: WELLS, day: d, H: H(), now: Date.now(), net: wfNet(), rot: rotNow(), testOf: w => (S.tests && S.tests[w.id]) || null, pmail: SEED.pmail });
+  const pmBuild = d => PMAIL.build({ S, L, AV, A: SEED.avocet, ref: SEED.ref, wells: WELLS, day: d, H: H(), now: Date.now(), net: wfNet(), rot: rotNow(), testOf: w => (S.tests && S.tests[w.id]) || null, pmail: SEED.pmail, fix: SEED.pmfix, mtk: mtkNow() });
   function pmStatus(d) {
     const r = PMAIL.rotOn(rotNow(), d, L), nm = ids => PMAIL.names(ids.map(id => WBY[id]).filter(Boolean));
-    return r ? `الآبار المتقطعة يوم ${esc(arDay(d))}: <b>بتتفتح</b> <bdi dir="ltr">${esc(nm(r.open))}</bdi>، و<b>بتتقفل</b> <bdi dir="ltr">${esc(nm(r.shut))}</bdi>.` : 'حركة الآبار المتقطعة واقفة: مش هتطلع في الميل.';
+    const tk = PMAIL.truckOn(mtkNow(), d), tn = SEED.pmfix && SEED.pmfix.truck ? SEED.pmfix.truck.n : '';
+    return (r ? `الآبار المتقطعة يوم ${esc(arDay(d))}: <b>بتتفتح</b> <bdi dir="ltr">${esc(nm(r.open))}</bdi>، و<b>بتتقفل</b> <bdi dir="ltr">${esc(nm(r.shut))}</bdi>.` : 'حركة الآبار المتقطعة واقفة: مش هتطلع في الميل.')
+      + (tn ? `<br>تركة <bdi dir="ltr">${esc(tn)}</bdi>: ${tk == null ? 'واقفة' : tk ? `<b>فيه تركة</b> (${esc(String(mtkNow().bbl))} برميل)` : '<b>مفيش تركة</b>'}.` : '');
   }
   let PM = null;   // the email shown: { d, m }
   function vPmail() {
@@ -1727,6 +1731,21 @@
     S.cfg.irot = Object.assign({ a: IR.a, b: IR.b, ref: IR.d, open: op, on, oil, at: Date.now() }, stampBy()); mark('ir');
     audit('', 'الآبار المتقطعة', 'حركة الآبار المتقطعة', '', on ? `يوم ${IR.d} بتتفتح المجموعة ${op === 'a' ? 1 : 2}` : 'واقفة', curDay());
     IR = null; save(); closeModal(); render(); toast('اتحفظت');
+  }
+  // the oil truck of the EPF every other day: whether one comes that day, its oil, stopped when it changes
+  function mtkBox() {
+    if (!canPlan() || !(SEED.pmfix && SEED.pmfix.truck)) return;
+    const d = pmDay(), m = mtkNow() || { on: 1, ref: d, yes: 1, bbl: 80 }, tk = PMAIL.truckOn(Object.assign({}, m, { on: 1 }), d);
+    modal(`<h3>تركة <bdi dir="ltr">${esc(SEED.pmfix.truck.n)}</bdi></h3><p class="mute" style="margin:0 0 8px">التركة بتيجي يوم ويوم. البرنامج بيقلبها لوحده كل يوم: في الميل «Received one/no oil truck»، وفي الـ Deferred Production + التركة يوم ما تيجي و- يوم ما متجيش.</p>
+      <label class="lab">يوم ${esc(arDay(d))} فيه تركة؟</label>${tg2('id="tky"', !!tk, 'أيوه', 'لأ', 0)}
+      <label class="lab" style="margin-top:10px">التركة كام برميل؟</label><input class="in" id="tkb" inputmode="decimal" value="${esc(String(m.bbl ?? ''))}">
+      <label class="lab" style="margin-top:10px">الحركة</label>${tg2('id="tkon"', !!m.on, 'شغالة', 'واقفة', 0)}
+      <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="mtkok">حفظ</button></div>`);
+  }
+  function mtkOk() {
+    const b = parseFloat(L.normNum($('#tkb').value)); if (!(b >= 0)) return toast('التركة رقم بالبراميل');
+    S.cfg.mtk = Object.assign({ on: $('#tkon').checked ? 1 : 0, ref: pmDay(), yes: $('#tky').checked ? 1 : 0, bbl: b, at: Date.now() }, stampBy()); mark('tk');
+    save(); closeModal(); render(); toast('اتحفظت');
   }
   // the water-flood network of the email: each injector's wells supported (the sources' design capacities are not shown: not exact)
   function wfxBox() {
@@ -2147,6 +2166,8 @@
       case 'irback': return irotBox();
       case 'irok': return canPlan() && IR ? irotOk() : null;
       case 'wfx': return wfxBox();
+      case 'mtk': return mtkBox();
+      case 'mtkok': return canPlan() ? mtkOk() : null;
       case 'wfxok': return canPlan() ? wfxOk() : null;
       case 'repread': return canPlan() ? doRepRead() : null;
       case 'backup': return backup();
