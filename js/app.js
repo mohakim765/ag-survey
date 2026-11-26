@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.27';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.28';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1725,19 +1725,18 @@
     audit('', 'الآبار المتقطعة', 'حركة الآبار المتقطعة', '', on ? `يوم ${IR.d} بتتفتح المجموعة ${op === 'a' ? 1 : 2}` : 'واقفة', curDay());
     IR = null; save(); closeModal(); render(); toast('اتحفظت');
   }
-  // the water-flood network of the email: each source's design capacity, each injector's wells supported
+  // the water-flood network of the email: each injector's wells supported (the sources' design capacities are not shown: not exact)
   function wfxBox() {
     if (!canPlan()) return; const n = wfNet();
-    modal(`<h3>شبكة الـ WF</h3><p class="mute" style="margin:0 0 8px">الـ Design لكل بير مصدر، والآبار اللي كل بير حقن بيدعمها، زي شيت WF بتاعك. بيطلعوا في جدول الميل.</p>
-      ${n.src.map(([sid, des]) => { const w = WBY[sid]; return `<div class="wfxs"><div class="wfxh"><b dir="ltr">${esc(w ? w.n : sid)}</b><label>Design <input class="in" inputmode="numeric" data-wfd="${sid}" value="${esc(String(des))}"></label></div>
+    modal(`<h3>شبكة الـ WF</h3><p class="mute" style="margin:0 0 8px">الآبار اللي كل بير حقن بيدعمها، زي شيت WF بتاعك. بتطلع في جدول الميل.</p>
+      ${n.src.map(([sid]) => { const w = WBY[sid]; return `<div class="wfxs"><div class="wfxh"><b dir="ltr">${esc(w ? w.n : sid)}</b></div>
         ${n.inj.filter(x => x[1] === sid).map(([iid, , sup]) => { const x = WBY[iid]; return `<label class="wfxi"><span dir="ltr">${esc(x ? x.n : iid)}</span><input class="in" dir="ltr" data-wfs="${iid}" value="${esc(sup)}" placeholder="Support for wells"></label>`; }).join('')}</div>`; }).join('')}
       <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="wfxok">حفظ</button></div>`);
   }
   function wfxOk() {
     const n = SEED.wf || { src: [], inj: [] }, d = {}, s = {};
-    for (const el of document.querySelectorAll('[data-wfd]')) { const v = parseFloat(L.normNum(el.value)); if (!(v >= 0)) return toast('الـ Design رقم'); const o = n.src.find(x => x[0] === el.dataset.wfd); if (!o || o[1] !== v) d[el.dataset.wfd] = v; }
     for (const el of document.querySelectorAll('[data-wfs]')) { const v = el.value.trim(), o = n.inj.find(x => x[0] === el.dataset.wfs); if (!o || o[2] !== v) s[el.dataset.wfs] = v; }
-    S.cfg.wfx = Object.assign({ d, s, at: Date.now() }, stampBy()); mark('wx'); save(); closeModal(); toast('اتحفظت');
+    S.cfg.wfx = Object.assign({ d: (S.cfg.wfx || {}).d || {}, s, at: Date.now() }, stampBy()); mark('wx'); save(); closeModal(); toast('اتحفظت');
   }
   function vRep() {
     let h = top('تحديث من التقارير', 'المهندس والأدمن', 'settings') + '<main class="wrap">';
