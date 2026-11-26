@@ -59,14 +59,16 @@
     const down = [], back = [];
     for (const w of wells) {
       if (w.hid || w.t === 'WSW' || w.t === 'WIW' || inRot.has(w.id)) continue;
-      const dT = downH(w, day, s0, e0), dY = downH(w, yd, y0, y1); if (!dT && !dY) continue;
+      // (running all day both days, or down all day both days: nothing new to tell, the table would never end; a well that
+      // stopped is told the day it stopped and the day it ran again)
+      const dT = downH(w, day, s0, e0), dY = downH(w, yd, y0, y1); if (!dT && !dY) continue; if (dT >= 24 && dY >= 24) continue;
       const b = bopd(w), diff = b == null ? null : b * (dY - dT) / 24;
       if (!dT) { back.push({ w, dt: 0, r: 'On production 24 hrs.', diff }); continue; }
       // the cause: the day's longest stop; still down at the day's end (or now)
       let main = null, len = -1;
       for (const e of S.dt) { if (e.w !== w.id) continue; const a = Math.max(e.s, s0), z = Math.min(e.e == null ? e0 : e.e, e0); if (z > a && z - a > len) { len = z - a; main = e; } }
       const still = S.dt.some(e => e.w === w.id && e.s < T && (e.e == null || e.e >= T));
-      const more = dY && dY !== dT ? `, ${dT > dY ? 'More' : 'Less'} DT ${Math.abs(dT - dY)} hrs` : dY && dY === dT ? `, Same DT as y'day` : '';
+      const more = dY && dY !== dT ? `, ${dT > dY ? 'More' : 'Less'} DT ${Math.abs(dT - dY)} hrs` : dY && dY === dT && dT < 24 ? `, Same DT as y'day` : '';
       down.push({ w, dt: dT, r: `${main ? reasonText(main) : '**'}${more}. [${still ? 'Still Down' : 'Back to production'}]`, diff });
     }
     // the wells with the same hours and remarks in one row
