@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.22';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.23';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1499,6 +1499,16 @@
   const REP_TB = { gas: 'في شيت الجاز ليفت', water: 'في جدول آبار المية', oil: 'في جدول آبار الزيت' };
   const repXs = c => `الإنتاج: ${c.rp ? REP.desc(c.rp) : 'مش موجود'} · الهندسية: ${REP.desc(c.re)}`;
   const repWhy = a => `في البرنامج ${TYPE_AR[a.from] || a.from} · ${a.why === 'table' ? REP_TB[REP.tableOf(a.r)] : 'في التقرير'}: ${a.r.st || '—'}`;
+  // the type a report gives a well it has and the app does not: its status word, else where it is (the water flood
+  // injectors and source wells, the engineering report's gas wells); '' when it does not say
+  function repType(r) {
+    const st = String(r.st || '').trim().toUpperCase(), sh = String(r.sheet || '');
+    if (/^G\s*\/\s*L$|^GL$|GAS\s*LIFT/.test(st)) return 'GL'; if (/^ESP$/.test(st)) return 'ESP'; if (/^SRP$|^ROD/.test(st)) return 'SRP';
+    if (/^INJ/.test(st)) return 'WIW'; if (/^WSW$/.test(st)) return 'WSW'; if (/^(LIFT|P\.?\s*L)$/.test(st)) return 'PL'; if (/^(NF|N\.F|G\.?\s*W)$/.test(st)) return 'NF';
+    if (/water\s*flood/i.test(sh)) return (r.cols || []).includes('req') ? 'WIW' : 'WSW';
+    if (r.gt || /gas\s*wells/i.test(sh)) return 'NF';
+    return '';
+  }
   function repRecord(P, files) {
     const n = v => REP.num(v), u = me();
     return { day: P.day, files: files.map(f => f.name), date: files.map(f => f.date).filter(Boolean).sort().pop() || '', by: S.me, byn: u ? u.name : '', t: Date.now(), stale: P.stale ? 1 : 0, hidStop: P.hidStop,
@@ -1514,7 +1524,7 @@
       dup: P.dup.map(d => repIt(d.w, d.rows ? 'مرتين في الشيت: ' + d.rows.map(r => `${r.st}${REP.num(r.hrs) != null ? ' ' + REP.num(r.hrs) + ' ساعة' : ''}`).join(' و') + ' · متقفلش'
         : `${d.f === 'k' ? 'Factor' : 'التارجت'} في الشيت مرتين: ${d.v.map(v => v || 'قراية مباشرة').join(' و')} · متغيرش`)),
       keep: P.keep.map(c => repIt(c.w, 'في البرنامج مسجل إنه اشتغل ' + L.stamp(c.e.e))),
-      miss: P.miss.map(r => ({ n: r.n, x: r.st || '' })), absent: P.absent.map(w => repIt(w)) };
+      miss: P.miss.map(r => { const t = repType(r), g = t === 'WIW' && n(r.req) > 0 ? n(r.req) : null; return Object.assign({ n: String(r.n).trim(), x: r.st || '', t }, g ? { g } : {}); }), absent: P.absent.map(w => repIt(w)) };
   }
   const gasWells = () => { const ds = Object.keys(S.eng || {}).sort(); for (let i = ds.length - 1; i >= 0; i--) if ((S.eng[ds[i]].gw || []).length) return S.eng[ds[i]].gw; return []; };
   function repPlanNow() {
@@ -1559,6 +1569,7 @@
     for (const [k, title, cls] of REPS(preview)) {
       if (preview && (k === 'types' || k === 'xs')) continue;
       const a = rec[k] || []; if (!a.length) continue;
+      if (k === 'miss' && isAdmin()) { h += `<section class="sec rsec ${cls}"><h3>${esc(title)} <small>${a.length}</small></h3><p class="mute rnote">لو ده بير جديد دوس «ضيفه»: الاسم والنوع جايين من التقرير، وانت تكمل المنطقة ومكانه في الطريق والإحداثيات.</p>${a.map(x => `<div class="irow"><span class="nm">${esc(x.n)}<small>${esc(x.x)}${x.t ? ' · ' + esc(x.t) : ''}</small></span><button class="btn sm" data-act="repadd" data-n="${esc(x.n)}" data-t="${esc(x.t || '')}" data-g="${x.g || ''}">ضيفه</button></div>`).join('')}</section>`; continue; }
       h += `<section class="sec rsec ${cls}"><h3>${esc(title)} <small>${a.length}</small></h3>${a.map(x => x.i ? `<button class="wrow" data-act="well" data-w="${esc(x.i)}"><span class="wn">${esc(x.n)}</span><span class="ws">${esc(x.x)}</span><span class="wm"></span></button>` : `<div class="irow"><span class="nm">${esc(x.n)}<small>${esc(x.x)}</small></span></div>`).join('')}</section>`;
     }
     return h;
@@ -1742,16 +1753,21 @@
       audit(w.id, w.n, 'مسح بير جديد', '', 'اتمسح', curDay()); rebuildWells(); save(); render(); toast('اتمسح');
     });
   }
-  function newWellBox(aid) {
-    const ws = WELLS.filter(w => w.a === aid); MNA = aid;
-    modal(`<h3>بير جديد في ${esc(areaOf(aid).n)}</h3>
-      <label class="lab">اسم البير</label><input class="in" id="nwn" dir="ltr" autocapitalize="characters" autocomplete="off" placeholder="AG-160">
-      <label class="lab" style="margin-top:10px">النوع</label><select class="in" id="nwt">${L.TYPE_ORDER.map(t => `<option value="${t}">${t === 'GL' ? 'Gas Lift' : t}</option>`).join('')}</select><div id="nwx"></div>
-      <label class="lab" style="margin-top:10px">ييجي بعد أنهي بير في ترتيب الطريق</label>${wpHtml({ ws, first: 'أول بير في الطريق', sel: [ws.length ? ws[ws.length - 1].id : '__first'] })}
+  let NWREP = null;   // the new well comes from a report's list (its name, its type)
+  const nwRoute = aid => { const ws = WELLS.filter(w => w.a === aid); return wpHtml({ ws, first: 'أول بير في الطريق', sel: [ws.length ? ws[ws.length - 1].id : '__first'] }); };
+  function newWellBox(aid, pre) {
+    MNA = aid; NWREP = pre || null;
+    modal(`<h3>${pre ? 'بير جديد من التقرير' : 'بير جديد في ' + esc(areaOf(aid).n)}</h3>
+      ${pre ? `<label class="lab">المنطقة</label><select class="in" id="nwa">${pre.a ? '' : '<option value="">اختار المنطقة…</option>'}${areasOrdered().map(a => `<option value="${a.id}" ${a.id === pre.a ? 'selected' : ''}>${esc(a.n)}</option>`).join('')}</select>` : ''}
+      <label class="lab" ${pre ? 'style="margin-top:10px"' : ''}>اسم البير</label><input class="in" id="nwn" dir="ltr" autocapitalize="characters" autocomplete="off" placeholder="AG-160" value="${esc(pre ? pre.n : '')}">
+      <label class="lab" style="margin-top:10px">النوع${pre && !pre.t ? ' <em class="mute">(التقرير مقالش، اختاره)</em>' : ''}</label><select class="in" id="nwt">${pre && !pre.t ? '<option value="">اختار النوع…</option>' : ''}${L.TYPE_ORDER.map(t => `<option value="${t}" ${pre && pre.t === t ? 'selected' : ''}>${t === 'GL' ? 'Gas Lift' : t}</option>`).join('')}</select><div id="nwx"></div>
+      <label class="lab" style="margin-top:10px">ييجي بعد أنهي بير في ترتيب الطريق</label><div id="nwr">${aid ? nwRoute(aid) : '<p class="mute" style="margin:4px 0">اختار المنطقة الأول.</p>'}</div>
       <label class="lab" style="margin-top:10px">الإحداثيات <em class="mute">(اختياري، عشان يظهر على الخريطة)</em></label><input class="in" id="nwll" dir="ltr" autocomplete="off" placeholder="29.79138, 28.55316">
       <p class="mute" style="margin:4px 0 0">خط العرض وبعده خط الطول، زي ما بتطلع من خرايط جوجل.</p>
       <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="nwellok">إضافة</button></div>`);
     nwType(); $('#nwt').onchange = nwType;
+    if (pre && pre.g && $('#nwg')) $('#nwg').value = pre.g;   // the injector's target from the report (REQ INJ QTY)
+    if (pre) $('#nwa').onchange = () => { MNA = $('#nwa').value || null; $('#nwr').innerHTML = MNA ? nwRoute(MNA) : '<p class="mute" style="margin:4px 0">اختار المنطقة الأول.</p>'; };
   }
   function nwType() {
     const t = $('#nwt').value, x = $('#nwx'); if (!x) return;
@@ -1766,7 +1782,9 @@
   }
   function newWellOk() {
     const aid = MNA, n = ($('#nwn').value || '').trim().toUpperCase().replace(/\s+/g, ' '), t = $('#nwt').value;
+    if (!aid) return toast('اختار المنطقة');
     if (n.length < 3) return toast('اكتب اسم البير');
+    if (!t) return toast('اختار نوع البير');
     const key = x => String(x || '').toUpperCase().replace(/[\s_-]/g, ''), dup = WELLS.find(w => key(w.n) === key(n) || (w.p && key(w.p) === key(n)));
     if (dup) return toast(`البير ده موجود في ${areaOf(dup.a).n}${dup.hid ? ' (مخفي، تقدر تظهره)' : ''}`);
     const ll = parseLL($('#nwll').value); if (ll === false) return toast('الإحداثيات: خط العرض وبعده خط الطول، زي 29.79138, 28.55316');
@@ -1778,7 +1796,9 @@
     if (t === 'WIW') { const g = num('nwg'); if (g) w.tg = g; }
     S.cfg.newWells = S.cfg.newWells || {}; S.cfg.newWells[id] = w; mark('nw|' + id);
     audit(id, n, 'بير جديد', '', `${areaOf(aid).n} · ${t}`, curDay());
-    rebuildWells(); save(); closeModal(); render(); toast('اتضاف البير');
+    rebuildWells(); save(); closeModal();
+    if (NWREP && RP && RP.files) { NWREP = null; repPlanNow(); }   // the report's comparison again: the well is the app's now
+    render(); toast('اتضاف البير');
   }
   function vAudit() {
     const list = S.audit.slice(-300).reverse();
@@ -1832,6 +1852,7 @@
       case 'img': return doImages();
       case 'nwell': return isAdmin() ? newWellBox(V.a || SEED.areas[0].id) : null;
       case 'nwellok': return isAdmin() ? newWellOk() : null;
+      case 'repadd': return isAdmin() ? newWellBox(null, { n: b.dataset.n, t: b.dataset.t || '', g: b.dataset.g || '' }) : null;
       case 'wedit': return canWells() ? wellBox(b.dataset.w) : null;
       case 'weditok': return canWells() ? wellEditOk() : null;
       case 'wdel': return isAdmin() ? wellDel() : null;
