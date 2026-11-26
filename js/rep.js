@@ -2,7 +2,7 @@
    Works on the sheets from XL.read: every table that has a "WELL NAME" header is read by its column titles. */
 (function (root) {
   'use strict';
-  // well names: AG-02A = AG 2A = ag_02a; Shadow-E03 = SHADOW E3 …
+  // well names: XY-02A = XY 2A = xy_02a; Abc-E03 = ABC E3 …
   function toks(s) {
     s = String(s || '').toUpperCase().replace(/_/g, '-').replace(/X\(A\)/g, 'XA_');
     const out = [];
@@ -168,7 +168,8 @@
      running- running in the report (hours > 0), stopped in the app since before the report's day ended: the stop ends (at), at
               the start of the report's day (or when it stopped) plus the hours the report says it was down
      hidRun - running in the report, hidden from the technicians
-     hrs    - hours online in the report and in the app differ by an hour or more (that day)
+     hrs    - hours online in the report and in the app differ by an hour or more (that day; the app's downtime in whole
+              hours, or the hours an earlier approval set: o.hfix)
      tg     - target / factor changes (WIW: REQ INJ QTY; Gas Lift: Opt. INJ. GAS and Factor)
      miss   - in the report, not in the app;  absent - shown in the app, not in the report */
   const WATER = t => t === 'WIW' || t === 'WSW';
@@ -302,7 +303,7 @@
     if (e0 <= o.now) {
       const ends = new Map(P.running.map(x => [x.e, x.at]));
       const dt = o.dt.map(e => ends.has(e) ? Object.assign({}, e, { e: ends.get(e) }) : e).concat(P.close.map(x => ({ w: x.w.id, s: x.from || s0, e: null })));
-      for (const { w, r } of st.values()) { if (w.hid) continue; const hrs = num(r.hrs); if (hrs == null) continue; const app = L.uptime(dt, w.id, o.day, o.h, o.now).up; if (Math.abs(app - hrs) >= 1) P.hrs.push({ w, r, app, rep: hrs }); }
+      for (const { w, r } of st.values()) { if (w.hid) continue; const hrs = num(r.hrs); if (hrs == null) continue; const app = L.uptime(dt, w.id, o.day, o.h, o.now, (o.hfix || {})[w.id]).up; if (Math.abs(app - hrs) >= 1) P.hrs.push({ w, r, app, rep: hrs }); }
     }
     // targets and factors, only from tables of the well's type; two different values for one well change nothing
     const cand = new Map(), add = (w, f, a, b) => { const k = w.id + '|' + f, c = cand.get(k) || cand.set(k, { w, f, a, v: [] }).get(k); if (!c.v.includes(b)) c.v.push(b); };

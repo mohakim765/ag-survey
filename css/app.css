@@ -507,3 +507,14 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .btn.admb svg{width:26px;height:26px;flex:0 0 auto}
 .btn.admb .nbdg{position:absolute;top:6px;inset-inline-start:8px;margin:0}
 .avs{margin:10px 0;font-size:14px;line-height:1.6}.avs .ok{color:var(--ok)}.avs .warn{color:var(--warn)}
+/* the area's stops: a row opens the well, its button closes it or asks if it ran again */
+.srow{display:flex;align-items:center;gap:8px;border-top:1px solid var(--rule);padding-inline-end:12px}
+.sec h3+.srow{border-top:0}
+.srw{flex:1;min-width:0;display:grid;grid-template-areas:"n" "s" "a";row-gap:2px;text-align:start;background:none;border:0;padding:9px 14px;min-height:58px;color:inherit;font:inherit}
+.srw:active{background:var(--pen2)}
+.btn.sbt{flex:none;min-height:44px;font-weight:750}
+.btn.sup{background:var(--ok);border-color:var(--ok);color:var(--paper)}
+.tg2.tg3 button{padding:6px 8px}
+.rphn{display:flex;align-items:center;gap:8px;margin-top:8px}
+.rphn .in{max-width:200px}
+.hfx{margin:6px 0 0;font-size:13px;color:var(--warn);font-weight:600}

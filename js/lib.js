@@ -62,12 +62,29 @@
     for (const [s, e] of iv) { if (cs == null || s > ce) { if (cs != null) tot += ce - cs; cs = s; ce = e; } else ce = Math.max(ce, e); }
     if (cs != null) tot += ce - cs; return tot;
   }
-  // hours online for a production day (up to `now` for the current day)
-  function uptime(dt, wid, day, h, now) {
+  /* downtime in whole hours, rounded up, as the reports have it (no halves or quarters: an hour and a half down is 2, half an
+     hour is 1). A day's stops are added up first, then rounded; under a minute (the seconds of a time written "now") is 0 */
+  const wholeH = ms => Math.max(0, Math.ceil((ms - 59999) / 36e5));
+  /* hours online for a production day (up to `now` for the current day), the downtime in whole hours. fix: the hours online
+     an approved report set for that well and day (a whole day only) */
+  function uptime(dt, wid, day, h, now, fix) {
     const [a, b0] = dayWindow(day, h); const b = Math.min(b0, now); if (b <= a) return { up: 0, down: 0, span: 0 };
-    const down = downMs(dt, wid, a, b), span = b - a;
-    return { up: Math.round((span - down) / 36e5 * 10) / 10, down: Math.round(down / 36e5 * 10) / 10, span: Math.round(span / 36e5 * 10) / 10 };
+    const span = (b - a) / 36e5, r1 = v => Math.round(v * 10) / 10;
+    if (typeof fix === 'number' && b === b0) { const up = Math.max(0, Math.min(span, fix)); return { up, down: r1(span - up), span: r1(span), fix: 1 }; }
+    const down = Math.min(wholeH(downMs(dt, wid, a, b)), Math.ceil(span));
+    return { up: r1(Math.max(0, span - down)), down, span: r1(span) };
   }
+  /* each stop's share of the whole hours of its day: every stop keeps its whole hours and the hours the rounding added go to
+     the stops with the biggest leftover minutes, so a day's stops add up to the day's whole hours (two half hours: 1 and 0) */
+  function wholeSplit(parts, total) {
+    const fl = parts.map(ms => Math.floor(ms / 36e5)), out = fl.slice(); let left = total - fl.reduce((s, v) => s + v, 0);
+    const order = parts.map((ms, i) => [ms / 36e5 - fl[i], i]).sort((x, y) => y[0] - x[0] || x[1] - y[1]);
+    for (const [, i] of order) { if (left <= 0) break; out[i]++; left--; }
+    for (let i = out.length - 1; left < 0 && i >= 0; i--) { const t = Math.min(out[i], -left); out[i] -= t; left += t; }
+    return out;
+  }
+  // the hours online an approved report set for a well and day (the engineer's choice when the report and the app differ)
+  const hfixOf = (S, day, wid) => { const x = S.hfix && S.hfix[day] && S.hfix[day][wid]; return x && typeof x.h === 'number' ? x.h : undefined; };
   function reasonsFor() { return [...SIMPLE_REASONS.map(x => x[0]), OTHER]; }
 
   /* the fields a reading must have for the well to be done (★ in the form). Gas Lift: DS and Diff when the well has a factor,
@@ -131,7 +148,7 @@
         const D = S.days[day];
         for (const w of wells) {
           if (w.t !== t || !sel.has(w.a)) continue;
-          const r = D.r[w.id], wq = wAt(w, r); const up = uptime(S.dt, w.id, day, h, now); const ev = S.dt.some(e => e.w === w.id && e.s < dayWindow(day, h)[1] && (e.e == null || e.e > dayWindow(day, h)[0]));
+          const r = D.r[w.id], wq = wAt(w, r); const up = uptime(S.dt, w.id, day, h, now, hfixOf(S, day, w.id)); const ev = S.dt.some(e => e.w === w.id && e.s < dayWindow(day, h)[1] && (e.e == null || e.e > dayWindow(day, h)[0]));
           if (!r && !ev) continue;
           const vals = fs.map(k => { const v = r && r.v[k]; if (v == null || v === '') return null; if (FIELDS[k].k === 'csg') return CSG[v] || v; const x = toNum(v); return x == null ? v : x; });
           let ex = [];
@@ -175,17 +192,25 @@
     if (ds.length > 1) sheets.push({ name: 'Diesel', rows: ds, widths: [12, 14, 18, 18, 20, 12, 7, 10, 10, 11, 9, 16, 8] });
     // downtime
     const [a0] = dayWindow(from, h), [, b0] = dayWindow(to, h);
+    // (each stop's hours: its share of the whole hours of each day it touches, so a well's day adds up to the day's downtime)
     const dr = [['Well', 'Area', 'Type', 'Reason', 'AVOCET reason', 'Details', 'From', 'To', 'Hours (in range)', 'Recorded by', 'Source']];
-    for (const e of S.dt.slice().sort((x, y) => x.s - y.s)) {
-      const w = byId[e.w]; if (!w || !sel.has(w.a) || !(e.s < b0 && (e.e == null || e.e > a0))) continue;
-      const hrs = Math.round((Math.min(e.e == null ? Math.min(b0, now) : e.e, b0) - Math.max(e.s, a0)) / 36e5 * 10) / 10;
-      dr.push([w.n, AREA_N(seed, w.a), w.t, e.r, avocet(e.r), e.o || '', stamp(e.s), e.e ? stamp(e.e) : 'لسه واقف', hrs, e.byn || '', e.src === 'int' ? 'تشغيل متقطع' : e.src === 'maint' ? 'صيانة' : 'الفني']);
+    const evs = S.dt.filter(e => byId[e.w] && sel.has(byId[e.w].a) && e.s < b0 && (e.e == null || e.e > a0)).sort((x, y) => x.s - y.s);
+    const share = new Map(evs.map(e => [e, 0])), byW = new Map();
+    for (const e of evs) { if (!byW.has(e.w)) byW.set(e.w, []); byW.get(e.w).push(e); }
+    for (const [wid, es] of byW) for (let d = from; d <= to; d = addDays(d, 1)) {
+      const [s, e0] = dayWindow(d, h), b = Math.min(e0, now); if (b <= s) continue;
+      const part = es.map(e => Math.max(0, Math.min(e.e == null ? b : e.e, b) - Math.max(e.s, s))); if (!part.some(Boolean)) continue;
+      const sp = wholeSplit(part, wholeH(downMs(es, wid, s, b))); es.forEach((e, i) => share.set(e, share.get(e) + sp[i]));
+    }
+    for (const e of evs) {
+      const w = byId[e.w];
+      dr.push([w.n, AREA_N(seed, w.a), w.t, e.r, avocet(e.r), e.o || '', stamp(e.s), e.e ? stamp(e.e) : 'لسه واقف', share.get(e), e.byn || '', e.src === 'int' ? 'تشغيل متقطع' : e.src === 'maint' ? 'صيانة' : e.src === 'job' ? 'شغل على البير' : e.src === 'rep' ? 'التقرير' : 'الفني']);
     }
     if (dr.length > 1) sheets.push({ name: 'Downtime', rows: dr, widths: [18, 14, 7, 24, 30, 26, 16, 16, 10, 16, 12] });
     // hours online per well per day
-    const ho = [['Prod. Day', 'Area', 'Well', 'Type', 'Hours online', 'Hours down']];
-    for (const day of days) for (const w of wells) { if (!sel.has(w.a) || w.hid) continue; const u = uptime(S.dt, w.id, day, h, now); if (u.span === 0) continue; ho.push([{ date: day }, AREA_N(seed, w.a), w.n, w.t, u.up, u.down]); }
-    if (ho.length > 1) sheets.push({ name: 'Hours online', rows: ho, widths: [12, 14, 18, 7, 12, 11] });
+    const ho = [['Prod. Day', 'Area', 'Well', 'Type', 'Hours online', 'Hours down', 'Note']];
+    for (const day of days) for (const w of wells) { if (!sel.has(w.a) || w.hid) continue; const u = uptime(S.dt, w.id, day, h, now, hfixOf(S, day, w.id)); if (u.span === 0) continue; ho.push([{ date: day }, AREA_N(seed, w.a), w.n, w.t, u.up, u.down, u.fix ? 'الساعات اتعدلت من التقرير' : '']); }
+    if (ho.length > 1) sheets.push({ name: 'Hours online', rows: ho, widths: [12, 14, 18, 7, 12, 11, 24] });
     // samples
     const sm = [['Prod. Day', 'Time', 'Point', 'Area', 'Sample', 'Taken by', 'Technician', 'Comment']];
     for (const s of S.samples) { if (!inRange(s.day, from, to)) continue; const w = byId[s.w]; if (w && !sel.has(w.a)) continue; sm.push([{ date: s.day }, hhmm(s.ts), w ? w.n : s.pt, w ? AREA_N(seed, w.a) : '', s.kind === 'W' ? 'Water' : 'Oil', s.who, s.byn || '', s.n || '']); }
@@ -206,6 +231,6 @@
     h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
     return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
   }
-  const api = { NOSCAN, INJM, reqFields, progress, wAt, uhash, CHEMS, CHEM_N, CHEM_MIN, chemMin, FIELDS, TYPES, CSG, TYPE_ORDER, SIMPLE_REASONS, avocet, natural, dist, bearing, OTHER, INTERMITTENT, ymd, hhmm, stamp, addDays, prodDay, dayWindow, normNum, toNum, gasCalc, gasValue, gasDiff, openEvent, downMs, uptime, reasonsFor, isDone, summary, deviations, checks, exportSheets };
+  const api = { NOSCAN, INJM, reqFields, progress, wAt, uhash, CHEMS, CHEM_N, CHEM_MIN, chemMin, FIELDS, TYPES, CSG, TYPE_ORDER, SIMPLE_REASONS, avocet, natural, dist, bearing, OTHER, INTERMITTENT, ymd, hhmm, stamp, addDays, prodDay, dayWindow, normNum, toNum, gasCalc, gasValue, gasDiff, openEvent, downMs, wholeH, wholeSplit, hfixOf, uptime, reasonsFor, isDone, summary, deviations, checks, exportSheets };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.L = api;
 })(typeof self !== 'undefined' ? self : this);

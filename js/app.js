@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.23';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.24';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -55,7 +55,7 @@
   const areaOf = id => SEED.areas.find(a => a.id === id);
   const canStaff = () => isAdmin() || !!(me() && (me().role === 'lead' || me().role === 'eng'));   // رئيس الورشة أو المهندس: توزيعة الأفراد
   const canPlan = () => isAdmin() || !!(me() && me().role === 'eng');     // المهندس: الصيانات والشغل والمهام
-  const canWells = canPlan;                                               // المهندس: بيانات الآبار والتقارير كمان
+  const canWells = canPlan;   // المهندس: كل حاجة في الآبار (بير جديد، النوع، الخانات الإجبارية، الإعدادات، التقارير، تعديل الأيام اللي فاتت). الأدمن زيادة: الناس والمستخدمين والربط بالشيت
   const planFor = (day, aid) => (S.plan && S.plan[day + '|' + aid]) || { staff: [], maint: [], work: [], tasks: [] };
   function planObj(day, aid) { S.plan = S.plan || {}; return S.plan[day + '|' + aid] || (S.plan[day + '|' + aid] = { staff: [], maint: [], work: [], tasks: [] }); }
   const MAINT = { stop: 'صيانة مولد (البير هيقف)', sync: 'صيانة مولد Sync (البير مش هيقف)', other: 'صيانة تانية' };
@@ -107,9 +107,9 @@
   }
 
   // ---------------- view state ----------------
-  let V = { v: 'home' }, VDAY = null; // VDAY: production day being viewed (admin can open past days)
+  let V = { v: 'home' }, VDAY = null; // VDAY: production day being viewed (the engineer and the admin open past days)
   const viewDay = () => VDAY || curDay();
-  const editable = () => viewDay() === curDay() || isAdmin();
+  const editable = () => viewDay() === curDay() || canWells();   // a day gone: the engineer and the admin (the morning's fixes)
 
   // ---------------- icons ----------------
   const P = {
@@ -357,7 +357,7 @@
     h += `<div class="search"><input id="uq" placeholder="ابحث بالاسم أو الرقم" value="${esc(V.q || '')}" autocomplete="off"></div><section class="sec"><h3>كل الحسابات <small>${us.length}</small></h3>`;
     h += us.map(u => `<div class="urow"><div class="nm"><b>${esc(u.name)}</b>${isPending(u) ? ' <span class="tag new">مستني التفعيل</span>' : ''}<small><bdi dir="ltr">${esc(u.u)}</bdi> · <bdi dir="ltr">${esc(u.phone || '')}</bdi>${u.emp ? ' · ' + esc(u.emp) : ''}</small></div>
       <div class="uact">${u.u === ADM() ? '<span class="urole">أدمن · كل الصلاحيات</span>' : `<select class="in" data-role="${ua(u)}" aria-label="الوظيفة">${ROLES.map(([r, l]) => `<option value="${r}" ${roleOf(u) === r ? 'selected' : ''}>${l}</option>`).join('')}</select>`}<button class="btn sm" data-act="uedit" data-u="${ua(u)}">تعديل</button></div></div>`).join('') || '<p class="empty">مفيش حد بالاسم ده</p>';
-    h += `</section><p class="mute">فني: القرايات والعينات. رئيس ورشة: وكمان توزيعة الأفراد. مهندس: وكمان الصيانات والشغل والمهام، وإرسال داتا أكتر من يوم. الأدمن: كل حاجة.</p>`;
+    h += `</section><p class="mute">فني: القرايات والعينات. رئيس ورشة: وكمان توزيعة الأفراد. مهندس: وكمان كل حاجة في الآبار (بير جديد، النوع، الخانات الإجبارية، الإعدادات، التقارير، Avocet، تعديل الأيام اللي فاتت)، والصيانات والشغل والمهام. الأدمن: كل ده، وزيادة عليه المستخدمين والربط بالشيت.</p>`;
     return h + '</main>' + tabs('settings');
   }
   function userBox(id) {
@@ -403,8 +403,8 @@
       const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
       h += `<div class="banner info inst"><span>${ios ? 'عشان تثبّته على الآيفون: من Safari دوس زرار المشاركة <b>⬆</b> وبعدين <b>Add to Home Screen</b>.' : window.__installEvt ? 'تقدر تثبّت البرنامج على الكمبيوتر وتفتحه من أيقونة.' : 'تقدر تثبّته من قايمة Chrome أو Edge: <b>Install Hudhud</b>.'}</span>${!ios && window.__installEvt ? '<button class="btn sm pen" data-act="install">ثبّت</button>' : ''}<button class="ib3 xs" data-act="noinst" aria-label="اقفل">×</button></div>`;
     }
-    if (isAdmin()) { const n = nReqs(); if (n) h += `<button class="banner info wide" data-act="go" data-v="users">فيه ${n === 1 ? 'طلب' : n + ' طلبات'} من المستخدمين مستني${n === 1 ? '' : 'ة'} ردك ←</button>`;
-      h += `<div class="card"><label class="lab">اليوم اللي بتشوفه <em>(الأدمن بس يقدر يفتح أيام قديمة)</em></label><input class="in" type="date" id="vday" value="${d}" max="${curDay()}"></div>`; }
+    if (isAdmin()) { const n = nReqs(); if (n) h += `<button class="banner info wide" data-act="go" data-v="users">فيه ${n === 1 ? 'طلب' : n + ' طلبات'} من المستخدمين مستني${n === 1 ? '' : 'ة'} ردك ←</button>`; }
+    if (canWells()) h += `<div class="card"><label class="lab">اليوم اللي بتشوفه <em>(المهندس والأدمن بس يقدروا يفتحوا أيام فاتت ويعدّلوها)</em></label><input class="in" type="date" id="vday" value="${d}" max="${curDay()}"></div>`;
     else if (d !== curDay()) VDAY = null;
     if (me() && !seesFollow()) { const mine = SEED.areas.filter(a => planFor(d, a.id).staff.some(x => isMe(staffP(x)))).map(a => a.n).concat(jobsFor(d).filter(j => j.staff.some(x => isMe(staffP(x)))).map(j => j.k));
       if (mine.length) h += `<p class="mine">النهارده انت في: <b>${mine.map(esc).join(' و')}</b></p>`; }
@@ -431,7 +431,7 @@
       <button class="fbtn ${tab === 'dt' ? 'on' : ''}" data-act="stab" data-v="dt">${ic('list')}المتابعة${nu ? `<b class="nbdg">${nu}</b>` : todo ? `<span class="fcnt">${todo}</span>` : ''}</button>${isAdmin() ? '<span class="tag" style="color:#f2f3f5;border-color:#f2f3f5">أدمن</span>' : ''}</div></header><main class="wrap">`;
     const tile = (k, label, big, sub) => `<button class="atab ${tab === k ? 'on' : ''}" data-act="stab" data-v="${k}"><span class="al">${label}</span><span class="ab">${big}</span>${sub ? `<span class="as">${sub}</span>` : ''}</button>`;
     h += `<div class="atabs">${tile('wells', 'الآبار', `${st.done}/${st.total}`, st.down ? `${st.down} واقف` : '')}${tile('samples', 'العينات', String(smp.length), smp.length ? `زيت ${smp.length - sW} · مية ${sW}` : 'مفيش لسه')}${tile('press', 'المانيفولد', nP ? `${pDone}/${nP}` : '—', '')}${tile('diesel', nC ? 'الديزل والكيميكال' : 'الديزل', nT + nC ? `${tDone + cDone}/${nT + nC}` : '—', [st.dl ? `${st.dl} ديزل تحت ${S.cfg.dieselMin}%` : '', st.cl ? `${st.cl} كيميكال ناقص` : ''].filter(Boolean).join(' · '))}</div>`;
-    if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للأدمن بس.</div>`;
+    if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للمهندس والأدمن بس.</div>`;
     if (tab === 'wells') h += areaWells(a, d);
     else if (tab === 'press') h += areaPress(a, d);
     else if (tab === 'diesel') h += areaDiesel(a, d);
@@ -446,7 +446,7 @@
     const pl = planFor(d, w.a), job = pl.maint.some(m => m.w.includes(w.id)) || pl.work.some(x => x.w === w.id);
     const tags = [opt.chip ? tchip(w.t) : '', s.open ? `<span class="tag dn">واقف</span>` : '', w.int ? `<span class="tag int">متقطع</span>` : '', w.hid ? `<span class="tag hid">مخفي</span>` : '', job ? `<span class="tag job">شغل النهارده</span>` : '', opt.dist != null ? `<span class="tag">${opt.dist}</span>` : ''].join('');
     const part = !s.open && !s.done && s.p.have > 0;
-    let sub = s.open ? `${esc(s.open.r)} · من ${sinceTxt(s.open.s)}` : sum ? esc(sum) : 'مستني قراية';
+    let sub = s.open ? `${s.open.r && s.open.r !== 'SI' ? esc(s.open.r) + ' · ' : ''}من ${sinceTxt(s.open.s)}` : sum ? esc(sum) : 'مستني قراية';
     if (part) sub += ` · ناقص ${s.p.miss.map(fname).join('، ')}`;
     else if (!s.open && !s.done && s.after) sub += ` · محتاج قراية بعد ما رجع ${hmA(s.after)}`;
     if (!s.open) { const [s0, e0] = L.dayWindow(d, H()), dm = L.downMs(S.dt, w.id, s0, Math.min(e0, Date.now())); if (dm > 0) sub += ` · وقف ${durTxt(dm)} النهارده`; }
@@ -669,8 +669,8 @@
     return h + '</div>';
   }
   const itemText = x => { const nm = id => WBY[id] ? WBY[id].n : id, it = x.it;
-    return x.k === 'maint' ? MAINT[it.k] + (it.at ? ' · ' + hmWords(it.at) : '') + ' · ' + it.w.map(nm).join('، ') + (it.n ? ' — ' + it.n : '')
-      : x.k === 'work' ? nm(it.w) + ' · ' + it.k + (it.n ? ' — ' + it.n : '') : it.x + (it.w ? ' · ' + nm(it.w) : ''); };
+    return x.k === 'maint' ? MAINT[it.k] + (it.st ? ' (البير هيقف)' : '') + (it.at ? ' · ' + hmWords(it.at) : '') + ' · ' + it.w.map(nm).join('، ') + (it.n ? ' — ' + it.n : '')
+      : x.k === 'work' ? nm(it.w) + ' · ' + it.k + (it.st ? ' (البير هيقف)' : '') + (it.n ? ' — ' + it.n : '') : it.x + (it.w ? ' · ' + nm(it.w) : ''); };
   function planSections(aids, d, cp, many) {
     const seen = S.ui.seen || {}, nm = id => WBY[id] ? esc(WBY[id].n) : id, ar = aid => many ? `<span class="tag">${esc(areaOf(aid).n)}</span> ` : '';
     const fresh = it => !seen[it.id] && it.by !== S.me ? ' nw' : '', del = (k, it, aid) => cp ? `<button class="ib3" data-act="pldel" data-k="${k}" data-a="${aid}" data-i="${it.id}" aria-label="امسح">×</button>` : '';
@@ -678,9 +678,9 @@
     const add = k => cp ? `<button class="linkbtn" data-act="pladd" data-k="${k}"${many ? '' : ` data-a="${aids[0]}"`}>+ ${{ maint: 'صيانة', work: 'شغل على بير', tasks: 'مهمة' }[k]}</button>` : '';
     const M = all('maint'), Wk = all('work'), T = all('tasks');
     let h = `<section class="sec plan"><h3>صيانات اليوم <small>المهندس · ${M.length}</small></h3>`;
-    h += M.length ? M.map(({ it, aid }) => `<div class="pitem${fresh(it)}"><span class="pt">${ar(aid)}${esc(MAINT[it.k])}${it.at ? ` · ${esc(hmWords(it.at))}` : ''}<small>${it.w.map(nm).join(' · ')}${it.n ? ' — ' + esc(it.n) : ''}</small></span>${del('maint', it, aid)}</div>`).join('') : '<p class="empty">مفيش صيانات النهارده</p>';
+    h += M.length ? M.map(({ it, aid }) => `<div class="pitem${fresh(it)}"><span class="pt">${ar(aid)}${esc(MAINT[it.k])}${it.st ? ' · البير هيقف' : ''}${it.at ? ` · ${esc(hmWords(it.at))}` : ''}<small>${it.w.map(nm).join(' · ')}${it.n ? ' — ' + esc(it.n) : ''}</small></span>${del('maint', it, aid)}</div>`).join('') : '<p class="empty">مفيش صيانات النهارده</p>';
     h += add('maint') + `</section><section class="sec plan"><h3>شغل على الآبار <small>${Wk.length}</small></h3>`;
-    h += Wk.length ? Wk.map(({ it, aid }) => `<div class="pitem${fresh(it)}"><span class="pt">${ar(aid)}${nm(it.w)} · ${esc(it.k)}<small>${it.n ? esc(it.n) : ''}</small></span>${del('work', it, aid)}</div>`).join('') : '<p class="empty">مفيش شغل على آبار النهارده</p>';
+    h += Wk.length ? Wk.map(({ it, aid }) => `<div class="pitem${fresh(it)}"><span class="pt">${ar(aid)}${nm(it.w)} · ${esc(it.k)}${it.st ? ' · البير هيقف' : ''}<small>${it.n ? esc(it.n) : ''}</small></span>${del('work', it, aid)}</div>`).join('') : '<p class="empty">مفيش شغل على آبار النهارده</p>';
     h += add('work') + `</section><section class="sec plan"><h3>مهام مطلوبة <small>${T.filter(x => x.it.done).length}/${T.length}</small></h3>`;
     h += T.length ? T.map(({ it, aid }) => `<div class="pitem${fresh(it)}"><label class="tk"><input type="checkbox" data-task="${it.id}" data-a="${aid}" ${it.done ? 'checked' : ''} ${editable() ? '' : 'disabled'}><span class="pt">${ar(aid)}${esc(it.x)}${it.w ? ' · ' + nm(it.w) : ''}<small>${it.done ? 'خلصت · ' + esc(it.done.byn || '') + ' ' + hmA(it.done.t) : esc(it.byn || '')}</small></span></label>${del('tasks', it, aid)}</div>`).join('') : '<p class="empty">مفيش مهام النهارده</p>';
     return h + add('tasks') + '</section>';
@@ -698,7 +698,7 @@
   function vStaff() {
     const d = viewDay(), cs = canStaff() && editable(), ids = SEED.areas.map(a => a.id), yd = L.addDays(d, -1);
     let h = top('توزيعة الأفراد', dayLine(), 'follow') + '<main class="wrap">';
-    if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للأدمن بس.</div>`;
+    if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للمهندس والأدمن بس.</div>`;
     h += `<button class="btn wa wide" style="margin-top:12px" data-act="stshare">${ic('share')} ابعت التوزيعة صورة على الواتساب</button>`;
     h += `<section class="sec plan"><div class="pbody"><div class="sgrid">${areasOrdered().map(a => sbox({ aid: a.id }, d, cs)).join('')}${jobsFor(d).map(j => sbox({ job: j.id }, d, cs)).join('')}${cs ? '<button class="sadd" data-act="jobadd"><b>+</b>خانة تانية<small>سيارة الديزل، Treatment…</small></button>' : ''}</div>`;
     if (cs && ids.every(id => !planFor(d, id).staff.length) && !jobsFor(d).length && (ids.some(id => planFor(yd, id).staff.length) || jobsFor(yd).length)) h += `<button class="btn wide" style="margin-top:10px" data-act="stcopyall">نفس توزيعة امبارح</button>`;
@@ -707,7 +707,7 @@
   function vFollow() {
     const d = viewDay(), cp = canPlan() && editable(), ids = SEED.areas.map(a => a.id), now = Date.now();
     let h = top('المتابعة', dayLine()) + '<main class="wrap">';
-    if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للأدمن بس.</div>`;
+    if (!editable()) h += `<div class="banner">ده يوم قديم. التعديل للمهندس والأدمن بس.</div>`;
     h += staffCard(d) + planSections(ids, d, cp, true) + (canPlan() ? rigHtml() : '');
     const open = WELLS.filter(w => !w.hid).map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
     const sp = downSplit(open, now);
@@ -790,20 +790,62 @@
     }
     return top(`<bdi>${esc(title)}</bdi>`, RIGK[k] + ' · تقرير الهندسية ' + esc(arDay(E.d)), 'rig') + `<main class="wrap"><section class="sec rig"><div class="rgi">${b}</div></section></main>` + tabs('follow');
   }
+  /* a job that stops the well: today's generator maintenance, and the other maintenance and the work on a well the engineer
+     marked «البير هيقف». Its stop starts with the job's reason (the technician changes it if he wants): t the technician's
+     word for it, a Avocet's (the engineer's list, and the technician's when he has no word for it, shown as l) */
+  const JOBR = { 'بلوف': [null, 'Wellhead/Xtree'], Slickline: [null, 'Elective Slickline And Coil Tubing'], Wireline: ['Wireline', 'Wireline Intervention - Gauging'], 'Coil Tubing': [null, 'Elective Slickline And Coil Tubing'], 'حفار': ['Workover', 'Workover'] };
+  const stops = (k, it) => k === 'maint' ? it.k === 'stop' || !!it.st : !!it.st;
+  function jobPre(k, it) {
+    if (k === 'maint') return it.k === 'stop' ? { t: 'Generator صيانة', a: 'Generator (Planned)', l: '', mid: it.id, o: it.n || '', src: 'maint' } : { t: null, a: 'Equipment Maintenance', l: 'صيانة', mid: it.id, o: it.n || '', src: 'maint' };
+    const j = JOBR[it.k] || [null, '']; return { t: j[0], a: j[1], l: it.k, mid: it.id, o: it.n || '', src: 'job' };
+  }
+  const jobName = (k, it) => (k === 'maint' ? (it.k === 'stop' ? 'صيانة مولد' : 'صيانة') : it.k) + (it.at ? ' · ' + hmWords(it.at) : '');
+  /* the technician's stops in an area, in the order the work goes: «محتاج يتقفل النهارده» (the jobs that stop a well, until
+     its stop is written) ← «الآبار الواقفة» (stopped today or yesterday, each with «هل اشتغل؟») ← «وقفت ورجعت تشتغل
+     النهارده» (so he checks his times). Only the times, from ← to: no hours. The older stops are in the area's wells list. */
+  function stopLists(a, d, now) {
+    const [s0, e0] = L.dayWindow(d, H()), yd = L.addDays(d, -1), y0 = L.dayWindow(yd, H())[0], T = Math.min(e0, now), act = d === curDay() && editable();
+    const mine = new Set(WELLS.filter(w => w.a === a.id && !w.hid).map(w => w.id));
+    const at = ts => { const pd = L.prodDay(ts, H()); return (pd === d ? '' : pd === yd ? 'امبارح ' : pd === L.addDays(d, 1) ? 'تاني يوم ' : esc(arDay(pd)) + ' ') + hmA(ts); };
+    const why = e => [e.r === 'SI' ? '' : e.r === L.INTERMITTENT ? 'متقطع' : e.r, evNote(e)].filter(Boolean).map(esc).join(' · ');
+    const row = (w, sub, when, btn) => `<div class="srow"><button class="srw" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)}</span>${sub ? `<span class="ws">${sub}</span>` : ''}${when ? `<span class="wa">${when}</span>` : ''}</button>${btn || ''}</div>`;
+    // 1. the jobs that stop a well, until a stop of it is written (the job's, one that started after the job was written, or the well stopped now)
+    const pl = planFor(d, a.id), need = [];
+    const jobs = pl.maint.filter(m => stops('maint', m)).flatMap(m => m.w.map(id => ({ k: 'maint', it: m, id }))).concat(pl.work.filter(x => stops('work', x)).map(x => ({ k: 'work', it: x, id: x.w })));
+    for (const j of jobs) {
+      const w = WBY[j.id]; if (!w || w.hid) continue;
+      const done = S.dt.some(e => e.w === w.id && (e.mid === j.it.id || (e.s <= T && (e.e == null || e.e > T)) || (e.s >= s0 && e.s < e0 && e.s >= (j.it.t || 0) - 18e5)));
+      if (!done) need.push(Object.assign({ w }, j));
+    }
+    let h = `<section class="sec"><h3>محتاج يتقفل النهارده <small>${need.length}</small></h3>`;
+    h += need.length ? need.map(x => row(x.w, esc(jobName(x.k, x.it)) + (x.it.n ? ' · ' + esc(x.it.n) : ''), '', act ? `<button class="btn danger sm sbt" data-act="jdown" data-w="${x.w.id}" data-k="${x.k}" data-i="${x.it.id}">اتقفل</button>` : '')).join('')
+      : '<p class="empty">مفيش آبار محتاجة تتقفل النهارده</p>';
+    // 2. stopped today or yesterday and still stopped (the intermittent wells shut in for build-up are in their own card)
+    const st = S.dt.filter(e => mine.has(e.w) && e.s >= y0 && e.s <= T && (e.e == null || e.e > T) && !(WBY[e.w].int && e.r === L.INTERMITTENT)).sort((x, y) => y.s - x.s);
+    h += `</section><section class="sec"><h3>الآبار الواقفة <small>${st.length}${downLost(st.map(e => ({ w: WBY[e.w], e })), d, now)}</small></h3>`;
+    h += st.length ? st.map(e => row(WBY[e.w], why(e), `من ${at(e.s)} ← ${e.e ? at(e.e) : 'لسه واقف'}`, act && e.e == null ? `<button class="btn sm sbt sup" data-act="jup" data-w="${e.w}">هل اشتغل؟</button>` : '')).join('')
+      : '<p class="empty">مفيش آبار واقفة من النهارده أو امبارح</p>';
+    // 3. ran again today
+    const bk = S.dt.filter(e => mine.has(e.w) && e.e != null && e.e >= s0 && e.e < e0).sort((x, y) => y.e - x.e);
+    h += `</section><section class="sec"><h3>وقفت ورجعت تشتغل النهارده <small>${bk.length}</small></h3>`;
+    h += bk.length ? bk.map(e => row(WBY[e.w], why(e), `من ${at(e.s)} ← ${at(e.e)}`)).join('') : '<p class="empty">لسه مفيش</p>';
+    return h + '</section>';
+  }
   function areaDown(a, d) {
     const now = Date.now(), [s0, e0] = L.dayWindow(d, H()), cp = canPlan() && editable(), cs = canStaff() && editable();
     let h = `<section class="sec plan"><h3>المتابعة · الأفراد <small>${esc(a.n)}</small></h3><div class="pbody">${staffBlock(a.id, d, cs, false)}</div></section>`;
-    h += planSections([a.id], d, cp, false);
+    h += planSections([a.id], d, cp, false) + stopLists(a, d, now);
     const ws = WELLS.filter(w => w.a === a.id && !w.hid);
-    const open = ws.map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e);
+    const sp = downSplit(ws.map(w => ({ w, e: L.openEvent(S.dt, w.id) })).filter(x => x.e), now);
+    if (!canPlan()) return h + downCards({ long: [], int: sp.int }, a.id);   // the technician: the older stops are in the wells list
+    // the engineer and the admin: the stopped for more than a day, every stop of the day with its hours, and the hours online
+    h += downCards(sp, a.id);
     const today = S.dt.filter(e => WBY[e.w] && WBY[e.w].a === a.id && e.s < e0 && (e.e == null || e.e > s0)).sort((x, y) => y.s - x.s);
-    const sp = downSplit(open, now);
-    h += `<section class="sec"><h3>واقف دلوقتي <small>${sp.now.length}${downLost(sp.now, d, now)}</small></h3>${downRows(sp.now, d, false, now)}</section>${downCards(sp, a.id)}`;
     h += `<section class="sec"><h3>وقفات النهارده <small>${today.length}</small></h3>`;
     h += today.length ? today.map(e => { const w = WBY[e.w]; return `<button class="wrow" data-act="well" data-w="${w.id}"><span class="wn">${esc(w.n)}</span><span class="ws">${esc(e.r)}${evNote(e) ? ' · ' + esc(evNote(e)) : ''}</span><span class="wa">${hmA(e.s)} ← ${e.e ? hmA(e.e) : 'لسه واقف'} · ${durTxt((e.e || now) - e.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(e.s, s0), Math.min(e.e || now, e0, now))) : ''}</span><span class="wm"></span></button>`; }).join('') : '<p class="empty">مفيش وقفات النهارده</p>';
-    h += `</section><section class="sec"><h3>ساعات التشغيل <small>من ${H()} الصبح لحد دلوقتي</small></h3>`;
-    const rows = visibleWells(a.id).map(w => ({ w, u: L.uptime(S.dt, w.id, d, H(), now) })).filter(x => x.u.down > 0);
-    h += rows.length ? rows.map(({ w, u }) => `<div class="irow"><span class="nm">${esc(w.n)}<small>شغال ${u.up} من ${u.span} ساعة</small></span></div>`).join('') : '<p class="empty">كل الآبار شغالة طول الوقت لحد دلوقتي</p>';
+    h += `</section><section class="sec"><h3>ساعات التشغيل <small>من ${H()} الصبح لحد دلوقتي · الوقوف بالساعات الكاملة</small></h3>`;
+    const rows = visibleWells(a.id).map(w => ({ w, u: L.uptime(S.dt, w.id, d, H(), now, L.hfixOf(S, d, w.id)) })).filter(x => x.u.down > 0);
+    h += rows.length ? rows.map(({ w, u }) => `<div class="irow"><span class="nm">${esc(w.n)}<small>شغال ${u.up} من ${u.span} ساعة${u.fix ? ' · اتعدلت من التقرير' : ''}</small></span></div>`).join('') : '<p class="empty">كل الآبار شغالة طول الوقت لحد دلوقتي</p>';
     return h + '</section>';
   }
   // people: pick from the people registered on the app (list + search, several at once), or type a name (phone optional)
@@ -991,16 +1033,17 @@
     MPA = aid || null; MPK = k; const many = !aid;
     const t = { maint: 'صيانة اليوم', work: 'شغل على بير', tasks: 'مهمة' }[k], head = `<h3>${t}${many ? '' : ' · ' + esc(areaOf(aid).n)}</h3>`;
     const btns = `<div class="btns" style="margin-top:12px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="plok" data-k="${k}">حفظ</button></div>`;
+    const stopQ = hide => `<div id="pstw" ${hide ? 'hidden' : ''}><label>البير هيقف؟</label>${tg2('id="pst"', false, 'أيوه، هيقف', 'لأ', 0)}<p class="mute" style="margin:4px 0 0">لو هيقف، الفني بيلاقيه في «محتاج يتقفل النهارده».</p></div>`;
     if (k === 'maint') modal(`${head}<label>نوع الصيانة</label><select class="in" id="mk">${Object.entries(MAINT).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select><p class="mute" id="mkh" style="margin:4px 0 0"></p>
-      <label>الآبار</label>${wpHtml({ ws: planPool('maint', 'stop'), multi: true, many, onPick: planArea })}<div id="pla"></div>
+      <label>الآبار</label>${wpHtml({ ws: planPool('maint', 'stop'), multi: true, many, onPick: planArea })}<div id="pla"></div>${stopQ(true)}
       <label>ملاحظة</label><input class="in" id="mn" placeholder="اختياري">${btns}`);
     if (k === 'work') modal(`${head}<label>البير</label>${wpHtml({ ws: planPool('work'), many, onPick: planArea })}<div id="pla"></div>
-      <label>نوع الشغل</label><select class="in" id="pwk">${WORK.map(x => `<option>${esc(x)}</option>`).join('')}</select><label>ملاحظة</label><input class="in" id="pwn">${btns}`);
-    if (k === 'tasks') modal(`${head}<label>المطلوب</label><input class="in" id="ptx" placeholder="مثلاً: عينة مية من AG-119"><label>البير <em class="mute">(لو المهمة على بير)</em></label>${wpHtml({ ws: planPool('tasks'), none: 'من غير بير', many, onPick: planArea })}<div id="pla"></div>${btns}`);
+      <label>نوع الشغل</label><select class="in" id="pwk">${WORK.map(x => `<option>${esc(x)}</option>`).join('')}</select>${stopQ(false)}<label>ملاحظة</label><input class="in" id="pwn">${btns}`);
+    if (k === 'tasks') modal(`${head}<label>المطلوب</label><input class="in" id="ptx" placeholder="مثلاً: عينة مية من البير"><label>البير <em class="mute">(لو المهمة على بير)</em></label>${wpHtml({ ws: planPool('tasks'), none: 'من غير بير', many, onPick: planArea })}<div id="pla"></div>${btns}`);
     if (k === 'maint') { const mk = $('#mk'); mk.onchange = () => { const n = WP.sel.length; WP.ws = planPool('maint', mk.value); WP.sel = WP.sel.filter(id => WP.ws.some(w => w.id === id)); wpRefresh(true); planArea(); mkHint(); if (WP.sel.length < n) toast('شلت الآبار اللي مفيهاش مولد'); }; mkHint(); }
     planArea();
   }
-  function mkHint() { const h = $('#mkh'), v = ($('#mk') || {}).value; if (h) h.textContent = v === 'other' ? '' : 'بتظهر آبار المولدات بس: ESP و SRP و WSW. البير اللي هيقف، الفني بيسجّل وقفته من شاشة البير.'; }
+  function mkHint() { const h = $('#mkh'), v = ($('#mk') || {}).value, q = $('#pstw'); if (h) h.textContent = v === 'other' ? '' : v === 'stop' ? 'بتظهر آبار المولدات بس: ESP و SRP و WSW. الآبار دي بتظهر للفني في «محتاج يتقفل النهارده».' : 'بتظهر آبار المولدات بس: ESP و SRP و WSW.'; if (q) q.hidden = v !== 'other'; }
   // the area comes from the well; a task with no well needs its area, so the people there get the alert
   function planArea() {
     const el = $('#pla'); if (!el) return;
@@ -1018,13 +1061,13 @@
       if (mk !== 'other' && w.some(id => !hasGen(WBY[id]))) return toast('صيانة المولد للآبار اللي عليها مولد بس');
       const by = {}; for (const id of w) (by[aOf(id)] = by[aOf(id)] || []).push(id);
       for (const [aid, ws] of Object.entries(by)) {
-        const it = Object.assign(base(), { k: mk, w: ws, n }); planObj(d, aid).maint.push(it); mark(`pm|${d}|${aid}|${it.id}`);
+        const it = Object.assign(base(), { k: mk, w: ws, n }, mk === 'other' && $('#pst') && $('#pst').checked ? { st: 1 } : {}); planObj(d, aid).maint.push(it); mark(`pm|${d}|${aid}|${it.id}`);
         audit('plan', areaOf(aid).n, 'صيانة', '', MAINT[mk] + ': ' + ws.map(id => WBY[id].n).join('، '), d); done.push(aid);
       }
     }
     if (k === 'work') {
       const w = WP.sel[0]; if (!w || !WBY[w]) return toast('اختار البير'); const aid = aOf(w);
-      const it = Object.assign(base(), { w, k: $('#pwk').value, n: ($('#pwn').value || '').trim() }); planObj(d, aid).work.push(it); mark(`pw|${d}|${aid}|${it.id}`);
+      const it = Object.assign(base(), { w, k: $('#pwk').value, n: ($('#pwn').value || '').trim() }, $('#pst') && $('#pst').checked ? { st: 1 } : {}); planObj(d, aid).work.push(it); mark(`pw|${d}|${aid}|${it.id}`);
       audit('plan', areaOf(aid).n, 'شغل على بير', '', WBY[w].n + ' ' + it.k, d); done.push(aid);
     }
     if (k === 'tasks') {
@@ -1096,11 +1139,9 @@
     if (!M.length && !Wk.length && !T.length) return '';
     const by = (it, n) => (n || it.byn) ? `<small>${n ? esc(n) : ''}${n && it.byn ? ' · ' : ''}${it.byn ? 'من ' + esc(it.byn) : ''}</small>` : '';
     let h = '<div class="jobs"><p class="evh">شغل النهارده على البير</p>';
-    for (const m of M) {
-      const logged = evs.some(x => x.mid === m.id), btn = m.k === 'stop' && !ro && !e && !logged ? `<button class="btn danger sm" data-act="mdown" data-i="${m.id}">البير وقف للصيانة</button>` : logged ? '<span class="mute">اتسجلت الوقفة</span>' : '';
-      h += `<div class="job"><span class="jt">${esc(MAINT[m.k])}${by(m, m.n)}</span>${btn}</div>`;
-    }
-    for (const x of Wk) h += `<div class="job"><span class="jt">${esc(x.k)}${by(x, x.n)}</span></div>`;
+    const sbtn = (k, it, lab) => { const logged = evs.some(x => x.mid === it.id); return stops(k, it) && !ro && !e && !logged ? `<button class="btn danger sm" data-act="mdown" data-k="${k}" data-i="${it.id}">${lab}</button>` : logged ? '<span class="mute">اتسجلت الوقفة</span>' : ''; };
+    for (const m of M) h += `<div class="job"><span class="jt">${esc(MAINT[m.k])}${m.st ? ' · البير هيقف' : ''}${by(m, m.n)}</span>${sbtn('maint', m, 'البير وقف للصيانة')}</div>`;
+    for (const x of Wk) h += `<div class="job"><span class="jt">${esc(x.k)}${x.st ? ' · البير هيقف' : ''}${by(x, x.n)}</span>${sbtn('work', x, 'البير وقف للشغل')}</div>`;
     for (const x of T) h += `<div class="job"><span class="jt">${esc(x.x)}${by(x)}</span>${x.done ? '<span class="mute">اتعملت</span>' : ''}</div>`;
     return h + '</div>';
   }
@@ -1134,6 +1175,7 @@
       const dm = L.downMs(S.dt, w.id, s0, Math.min(e0, now)), span = Math.min(e0, now) - s0, up = span - dm;
       h += `<div class="evs"><p class="evh">النهارده وقف <b>${durTxt(dm)}</b>${up >= 60000 ? ` · اشتغل ${durTxt(up)}` : ''}</p>${evs.map(x => `<div class="ev"><span class="evt">${esc(x.r)}${evNote(x) ? ' · ' + esc(evNote(x)) : ''}<small>${hmA(x.s)} ← ${x.e ? hmA(x.e) : 'لسه واقف'} · ${durTxt((x.e || now) - x.s)}${testOf(w) ? ' · ' + lossTxt(loss(w, Math.max(x.s, s0), Math.min(x.e || now, e0, now))) : ''}${x.byn ? ' · ' + esc(x.byn) : ''}</small></span>${canEditEv(x) ? `<button class="ib3" data-act="evedit" data-e="${x.id}" aria-label="تعديل">✎</button>` : ''}</div>`).join('')}</div>`;
     }
+    { const fx = S.hfix && S.hfix[d] && S.hfix[d][w.id]; if (fx) h += `<p class="hfx">الساعات اتعدلت من التقرير: <b>${esc(String(fx.h))}</b> ساعة تشغيل${fx.byn ? ` <span class="mute">· ${esc(fx.byn)}</span>` : ''}</p>`; }
     if (!ro && !e) h += `<button class="linkbtn" data-act="evadd">+ سجّل وقفة حصلت وخلصت</button>`;
     return h + '</div>' + prodHtml(w, d);
   }
@@ -1160,7 +1202,7 @@
     let h = `<header class="fhead"><div class="wrap"><button class="ib" data-act="fclose" aria-label="رجوع">${ic('back')}</button><div class="tt"><h2 class="fname">${esc(w.n)}</h2><p class="sub">${esc(sub)}</p></div><span class="fsv" id="fsv" aria-live="polite"></span></div></header><div class="fbody"><div class="wrap">`;
     h += statusHtml(w, ro);
     if (canWells()) h += `<button class="linkbtn" data-act="wedit" data-w="${w.id}">✎ بيانات البير: النوع، التارجت، الفاكتور، يظهر ولا لأ، الكيميكال</button>`;
-    if (w.hid) h += `<div class="banner">البير ده مخفي عن الفنيين. لو سجلت قراية، الأدمن هيعرف.</div>`;
+    if (w.hid) h += `<div class="banner">البير ده مخفي عن الفنيين. لو سجلت قراية، المهندس والأدمن هيعرفوا.</div>`;
     if (w.t === 'GL') h += `<div class="banner info">العداد: <b>${esc(w.m || (w.k > 0 ? 'Orifice' : '—'))}</b>${w.k > 0 ? ` · Factor ${w.k}` : ' · قراية مباشرة'}${w.tg ? ` · التارجت ${w.tg}` : ''}</div>`;
     if (w.disc) h += `<div class="banner">العداد Disconnected. القرايات مش إجبارية، اكتب اللي حصل في الكومنت.</div>`;
     const rq = L.reqFields(w, S.cfg);
@@ -1317,36 +1359,46 @@
     save(); closeModal(); renderForm(); toast('اتسجل');
   }
   function evDel() { const x = S.dt.find(e => e.id === MEV), w = FM.w; if (!x) return; confirmBox('تمسح الوقفة دي؟', 'امسح', () => { S.dt = S.dt.filter(e => e.id !== x.id); mark('e|' + x.id); audit(w.id, w.n, 'مسح وقفة', `${x.r} ${hm(x.s)}-${x.e ? hm(x.e) : 'لسه'}`, '', viewDay()); save(); renderForm(); toast('اتمسحت'); }); }
-  let DPRE = null; // {r, mid, o}: the stop comes from today's maintenance
+  let DPRE = null; // jobPre(): the stop comes from a job of today (maintenance, or work the engineer said stops the well)
+  let BW = null;   // the well of the stop / ran-again box: from the well screen, or from a row of the area's stops
+  const afterBox = () => (FM && !formEl.hidden ? renderForm() : render());
   function downBox(w, pre) {
-    const rs = reasonList(w), pr = pre ? (rs.includes(pre.r) ? pre.r : L.avocet(pre.r)) : ''; DPRE = pre || null;
-    modal(`<h3>${esc(w.n)}: البير وقف${pre ? ' للصيانة' : ''}</h3><label>السبب</label><select class="in" id="dr"><option value="">اختار السبب…</option>${rs.map(r => `<option ${pr === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
-      <div id="dro" hidden><label>اكتب السبب</label><input class="in" id="dot"></div><label>وقف الساعة كام؟</label>${timeInput('dts', Date.now())}${dayPick('dts')}
+    BW = w; DPRE = pre || null;
+    const rs = reasonList(w); let pr = '', add = '', ot = '';
+    if (pre) {
+      if (engReasons()) pr = rs.includes(pre.a) ? pre.a : pre.t && rs.includes(L.avocet(pre.t)) ? L.avocet(pre.t) : '';
+      else if (pre.t && rs.includes(pre.t)) pr = pre.t;
+      else if (pre.a) { pr = pre.a; add = `<option value="${esc(pre.a)}" selected>${esc(pre.l || pre.a)}</option>`; }
+      else { pr = L.OTHER; ot = [pre.l, pre.o].filter(Boolean).join(' — '); }
+    }
+    modal(`<h3>${esc(w.n)}: البير وقف${pre ? (pre.src === 'maint' ? ' للصيانة' : ' لـ ' + esc(pre.l)) : ''}</h3><label>السبب</label><select class="in" id="dr"><option value="">اختار السبب…</option>${add}${rs.map(r => `<option ${!add && pr === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
+      <div id="dro" ${pr === L.OTHER ? '' : 'hidden'}><label>اكتب السبب</label><input class="in" id="dot" value="${esc(ot)}"></div><label>وقف الساعة كام؟</label>${timeInput('dts', Date.now())}${dayPick('dts')}
       <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn danger" data-act="downok">سجّل الوقفة</button></div>`);
     $('#dr').onchange = () => { $('#dro').hidden = $('#dr').value !== L.OTHER; }; tWatch('dts');
   }
   function downOk() {
-    const w = FM.w, r = $('#dr').value, o = ($('#dot') ? $('#dot').value : '').trim();
+    const w = BW || FM.w, r = $('#dr').value, o = ($('#dot') ? $('#dot').value : '').trim();
     if (!r) return toast('اختار سبب الوقفة');
     if (r === L.OTHER && !o) return toast('اكتب السبب');
     const tv = readTime('dts'); if (tv === null) return toast(BADTIME);
-    const mt = DPRE && (DPRE.r === r || L.avocet(DPRE.r) === r) ? DPRE : null;
+    const mt = DPRE;   // from a job: the stop is the job's, whatever reason he picks
     const s = tv ? tsOn(tv, pickedDay('dts')) : Date.now(); if (s > Date.now() + 60000) return toast(FUTURE);
-    if (S.dt.some(x => x.w === w.id && (x.e == null || x.e > s))) return toast('الوقت ده متداخل مع وقفة تانية. عدّل الوقفة اللي قبلها'); const e = Object.assign({ id: uid(), w: w.id, s, e: null, r: r === L.OTHER ? 'Other' : r, o: o || (mt ? mt.o : ''), src: mt ? 'maint' : 'tech' }, stampBy()); e.byn = stampBy().byn; if (mt) e.mid = mt.mid;
-    pushEv(e); audit(w.id, w.n, 'داون تايم', '', `${e.r} من ${hm(s)}`, curDay()); save(); closeModal(); renderForm(); toast('اتسجلت الوقفة');
+    if (S.dt.some(x => x.w === w.id && (x.e == null || x.e > s))) return toast('الوقت ده متداخل مع وقفة تانية. عدّل الوقفة اللي قبلها'); const e = Object.assign({ id: uid(), w: w.id, s, e: null, r: r === L.OTHER ? 'Other' : r, o: r === L.OTHER ? o : mt ? [mt.l && mt.l !== r ? mt.l : '', mt.o].filter(Boolean).join(' — ') : '', src: mt ? mt.src : 'tech' }, stampBy()); e.byn = stampBy().byn; if (mt) e.mid = mt.mid;
+    pushEv(e); audit(w.id, w.n, 'داون تايم', '', `${e.r} من ${hm(s)}`, curDay()); save(); closeModal(); afterBox(); toast('اتسجلت الوقفة');
   }
   function upBox(w, intermittent) {
+    BW = w;
     modal(`<h3>${esc(w.n)}: ${intermittent ? 'فتحت البير' : 'رجع اشتغل'}</h3><label>الساعة كام؟</label>${timeInput('uts', Date.now())}${dayPick('uts')}
       ${intermittent ? '<label>WHSIP قبل الفتح <em class="mute">(اختياري)</em></label><input class="in" id="uws" inputmode="decimal">' : ''}
       <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="upok">تمام</button></div>`);
     tWatch('uts');
   }
   function upOk() {
-    const w = FM.w, e = L.openEvent(S.dt, w.id); if (!e) return closeModal();
+    const w = BW || FM.w, e = L.openEvent(S.dt, w.id); if (!e) return closeModal();
     const tv = readTime('uts'); if (tv === null) return toast(BADTIME);
     const t = tv ? tsOn(tv, pickedDay('uts')) : Date.now(); if (t > Date.now() + 60000) return toast(FUTURE); if (t < e.s) return toast('الوقت ده قبل ما البير يقف');
     e.e = t; const ws = $('#uws') ? L.normNum($('#uws').value) : ''; if (ws) e.ws = ws; mark('e|' + e.id);
-    audit(w.id, w.n, 'رجع اشتغل', e.r, hm(t) + (ws ? ` · WHSIP ${ws}` : ''), curDay()); save(); closeModal(); renderForm(); toast('اتسجل');
+    audit(w.id, w.n, 'رجع اشتغل', e.r, hm(t) + (ws ? ` · WHSIP ${ws}` : ''), curDay()); save(); closeModal(); afterBox(); toast('اتسجل');
   }
   function intClose() {
     const w = FM.w; const s = Date.now();
@@ -1515,7 +1567,8 @@
       close: P.close.map(c => repIt(c.w, c.r.cause || '')), tg: P.tg.map(c => repIt(c.w, `${c.f === 'k' ? 'Factor' : 'التارجت'}: ${c.a || '—'} ← ${c.b || (c.f === 'k' ? 'قراية مباشرة' : '—')}`)),
       running: P.running.map(c => repIt(c.w, `التقرير ${n(c.r.hrs)} ساعة · كان واقف من ${L.stamp(c.e.s)} · اشتغل ${L.stamp(c.at)}`)),
       hidRun: P.hidRun.map(c => repIt(c.w, `${c.r.st} · ${n(c.r.hrs)} ساعة`)),
-      hrs: P.hrs.map(c => repIt(c.w, `التقرير ${c.rep} ساعة · البرنامج ${c.app}${c.r.cause ? ' · ' + c.r.cause : ''}`)),
+      hrs: P.hrs.map(c => { const v = hrsPick(c); return repIt(c.w, `التقرير ${c.rep} ساعة · البرنامج ${c.app}${c.r.cause ? ' · ' + c.r.cause : ''}${v == null ? ' · فضلت ساعات البرنامج' : ' · اتعتمد ' + v + ' ساعة'}`); }),
+      hrsAsk: P.hrs.map(c => ({ i: c.w.id, n: c.w.n, rep: c.rep, app: c.app, c: c.r.cause || '', pick: RP && RP.hs ? RP.hs[c.w.id] : undefined })),
       types: P.ask.map(a => repIt(a.w, `${repWhy(a)} · ${a.set ? 'اتغير لـ ' + (TYPE_AR[a.set] || a.set) : 'متغيرش، فضل ' + (TYPE_AR[a.from] || a.from)}`)),
       ask: P.ask.map(a => ({ i: a.w.id, n: a.w.n, x: repWhy(a), from: a.from, ty: a.ty, set: a.set })),
       xs: P.xs.map(c => repIt(c.w, `${repXs(c)} · ${c.set ? 'اتقفل' : 'متقفلش'}`)),
@@ -1526,9 +1579,18 @@
       keep: P.keep.map(c => repIt(c.w, 'في البرنامج مسجل إنه اشتغل ' + L.stamp(c.e.e))),
       miss: P.miss.map(r => { const t = repType(r), g = t === 'WIW' && n(r.req) > 0 ? n(r.req) : null; return Object.assign({ n: String(r.n).trim(), x: r.st || '', t }, g ? { g } : {}); }), absent: P.absent.map(w => repIt(w)) };
   }
+  /* the hours of a well the report and the app differ on: the engineer picks the report's, the app's (the default: a report can
+     be of another day, and the intermittent wells are opened one day and shut in the next) or writes the number. Returns the
+     hours to set, or null to keep the app's */
+  function hrsPick(c) {
+    const p = RP && RP.hs ? RP.hs[c.w.id] : undefined;
+    if (p === 'rep') return Math.max(0, Math.min(24, c.rep));
+    if (typeof p === 'number') return p;
+    return null;
+  }
   const gasWells = () => { const ds = Object.keys(S.eng || {}).sort(); for (let i = ds.length - 1; i >= 0; i--) if ((S.eng[ds[i]].gw || []).length) return S.eng[ds[i]].gw; return []; };
   function repPlanNow() {
-    RP.plan = REP.plan({ files: RP.files, wells: WELLS, alias: SEED.alias, dt: S.dt, day: RP.day, L, h: H(), now: Date.now(), today: curDay(), ty: RP.ty || {}, xs: RP.xs || {}, gasw: gasWells() });
+    RP.plan = REP.plan({ files: RP.files, wells: WELLS, alias: SEED.alias, dt: S.dt, day: RP.day, L, h: H(), now: Date.now(), today: curDay(), ty: RP.ty || {}, xs: RP.xs || {}, gasw: gasWells(), hfix: Object.fromEntries(Object.entries((S.hfix || {})[RP.day] || {}).map(([k, v]) => [k, v.h])) });
     RP.rec = repRecord(RP.plan, RP.files);
   }
   async function repRead(list) {
@@ -1566,10 +1628,16 @@
     if (preview && (rec.xsAsk || []).length) h += `<section class="sec rsec w"><h3>الإنتاج والهندسية مختلفين: واقف ولا شغال؟ <small>${rec.xsAsk.length}</small></h3>
       <p class="mute rnote">لحد ما تختار "اقفله"، البرنامج مش هيقفل البير.</p>${rec.xsAsk.map(a => `<div class="rask"><div class="nm">${esc(a.n)}<small>${esc(a.x)}</small></div>
       <div class="tg2"><button type="button" class="${a.set ? '' : 'on'}" data-act="rpxs" data-w="${esc(a.i)}" data-t="">سيبه زي ما هو</button><button type="button" class="${a.set ? 'on' : ''}" data-act="rpxs" data-w="${esc(a.i)}" data-t="close">واقف، اقفله</button></div></div>`).join('')}</section>`;
+    if (preview && canWells() && (rec.hrsAsk || []).length) h += `<section class="sec rsec w"><h3>ساعات التشغيل مختلفة: تعتمد أنهي؟ <small>${rec.hrsAsk.length}</small></h3>
+      <p class="mute rnote">اللي تختاره يبقى ساعات البير في اليوم ده، ويطلع في Avocet وقرايات التقرير والـ Excel. وقفات الفني مش بتتمسح.</p>${rec.hrsAsk.map(a => { const p = a.pick, own = typeof p === 'number' || p === 'own';
+        return `<div class="rask"><div class="nm">${esc(a.n)}<small>${a.c ? esc(a.c) : ''}</small></div>
+      <div class="tg2 tg3"><button type="button" class="${p === 'rep' ? 'on' : ''}" data-act="rphs" data-w="${esc(a.i)}" data-t="rep">التقرير ${esc(String(a.rep))}</button><button type="button" class="${!p || p === 'app' ? 'on' : ''}" data-act="rphs" data-w="${esc(a.i)}" data-t="app">البرنامج ${esc(String(a.app))}</button><button type="button" class="${own ? 'on' : ''}" data-act="rphs" data-w="${esc(a.i)}" data-t="own">اكتب رقم</button></div>
+      ${own ? `<div class="rphn"><input class="in" inputmode="numeric" data-rphn="${esc(a.i)}" value="${typeof p === 'number' ? p : ''}" placeholder="ساعات التشغيل من 0 لـ 24"><span class="mute">ساعة</span></div>` : ''}</div>`; }).join('')}</section>`;
     for (const [k, title, cls] of REPS(preview)) {
       if (preview && (k === 'types' || k === 'xs')) continue;
+      if (preview && k === 'hrs' && canWells()) continue;
       const a = rec[k] || []; if (!a.length) continue;
-      if (k === 'miss' && isAdmin()) { h += `<section class="sec rsec ${cls}"><h3>${esc(title)} <small>${a.length}</small></h3><p class="mute rnote">لو ده بير جديد دوس «ضيفه»: الاسم والنوع جايين من التقرير، وانت تكمل المنطقة ومكانه في الطريق والإحداثيات.</p>${a.map(x => `<div class="irow"><span class="nm">${esc(x.n)}<small>${esc(x.x)}${x.t ? ' · ' + esc(x.t) : ''}</small></span><button class="btn sm" data-act="repadd" data-n="${esc(x.n)}" data-t="${esc(x.t || '')}" data-g="${x.g || ''}">ضيفه</button></div>`).join('')}</section>`; continue; }
+      if (k === 'miss' && canWells()) { h += `<section class="sec rsec ${cls}"><h3>${esc(title)} <small>${a.length}</small></h3><p class="mute rnote">لو ده بير جديد دوس «ضيفه»: الاسم والنوع جايين من التقرير، وانت تكمل المنطقة ومكانه في الطريق والإحداثيات.</p>${a.map(x => `<div class="irow"><span class="nm">${esc(x.n)}<small>${esc(x.x)}${x.t ? ' · ' + esc(x.t) : ''}</small></span><button class="btn sm" data-act="repadd" data-n="${esc(x.n)}" data-t="${esc(x.t || '')}" data-g="${x.g || ''}">ضيفه</button></div>`).join('')}</section>`; continue; }
       h += `<section class="sec rsec ${cls}"><h3>${esc(title)} <small>${a.length}</small></h3>${a.map(x => x.i ? `<button class="wrow" data-act="well" data-w="${esc(x.i)}"><span class="wn">${esc(x.n)}</span><span class="ws">${esc(x.x)}</span><span class="wm"></span></button>` : `<div class="irow"><span class="nm">${esc(x.n)}<small>${esc(x.x)}</small></span></div>`).join('')}</section>`;
     }
     return h;
@@ -1598,14 +1666,21 @@
   function repApply() {
     if (!RP || !RP.plan || !canWells()) return; repPlanNow();
     const P = RP.plan, rec = RP.rec, [s0] = L.dayWindow(P.day, H()), lab = rec.date || P.day;
+    { const c = P.hrs.find(x => (RP.hs || {})[x.w.id] === 'own'); if (c) return toast('اكتب ساعات ' + c.w.n + ' أو اختار التقرير أو البرنامج'); }
     for (const a of P.ask) if (a.set) setEdit(a.w.id, 't', a.set);
-    delete rec.ask; delete rec.xsAsk;
+    delete rec.ask; delete rec.xsAsk; delete rec.hrsAsk;
     const by = { by: S.me, byn: (me() || {}).name || '', t: Date.now() };
     S.tests = S.tests || {}; for (const x of P.tests) { S.tests[x.w.id] = Object.assign({ d: x.d, bopd: x.bopd, bfpd: x.bfpd, wc: x.wc, gas: x.gas, src: x.src, day: P.day }, x.gw ? { gw: 1 } : {}, by); mark('wt|' + x.w.id); }
     if (P.eng) { S.eng = S.eng || {}; S.eng[P.eng.d] = Object.assign({}, P.eng, by); mark('en|' + P.eng.d); for (const k of Object.keys(S.eng).sort().slice(0, -30)) delete S.eng[k]; }
     for (const { w, r, from } of P.close) { const e = Object.assign({ id: uid(), w: w.id, s: from || s0, e: null, r: r.cause || 'SI', o: '', src: 'rep', rd: lab }, stampBy()); pushEv(e); audit(w.id, w.n, 'داون تايم', '', 'واقف في تقرير ' + lab, curDay()); }
     for (const { w, e, at } of P.running) { const x = S.dt.find(y => y.id === e.id); if (!x || x.e != null) continue; x.e = Math.max(at, x.s); mark('e|' + x.id); audit(w.id, w.n, 'رجع اشتغل', x.r, 'شغال في تقرير ' + lab + ' · ' + hm(x.e), curDay()); }
     for (const c of P.tg) setEdit(c.w.id, c.f, c.b || 0);
+    for (const c of P.hrs) {
+      const v = hrsPick(c); if (v == null) continue;
+      S.hfix = S.hfix || {}; const day = S.hfix[P.day] || (S.hfix[P.day] = {}), was = day[c.w.id];
+      day[c.w.id] = Object.assign({ h: v, rep: c.rep, app: c.app, c: c.r.cause || '', rd: lab }, by); mark(`hf|${P.day}|${c.w.id}`);
+      audit(c.w.id, c.w.n, 'ساعات التشغيل', was ? String(was.h) : String(c.app), String(v) + ' (من مقارنة تقرير ' + lab + ')', P.day);
+    }
     // hours and causes for Avocet: kept from an earlier approval of the same day unless this one has them from as good a source
     // (the gas tab before the production report before the engineering tests tab)
     const old = (S.reps || {})[P.day], rank = x => ({ g: 3, p: 2, e: 1 })[x && x[2]] || 0, merge = (a, b) => { const o = Object.assign({}, a || {}); for (const k in b || {}) if (rank(b[k]) >= rank(o[k])) o[k] = b[k]; return o; };
@@ -1643,12 +1718,12 @@
       ${q && q.st === 'wait' ? `<p class="banner info" style="margin:10px 0 0">طلب تعديل بياناتك مستني موافقة الأدمن.</p>` : q && q.st === 'no' ? `<p class="banner" style="margin:10px 0 0">الأدمن رفض طلب تعديل بياناتك اللي بعته. <button class="ib3 xs" data-act="profdis" aria-label="اقفل">×</button></p>` : ''}
       <div class="btns" style="margin-top:12px"><button class="btn" data-act="pinchg">غيّر الباسورد</button>${isAdmin() ? '' : '<button class="btn" data-act="profreq">عدّل بياناتي</button>'}<button class="btn" data-act="logout">خروج</button></div></div>`;
     if (isAdmin()) { const n = nReqs(); h += `<div class="card"><h3 style="margin:0 0 8px">الأدمن</h3><div class="adm3"><button class="btn admb" data-act="go" data-v="users">${ic('users')}<span>المستخدمين</span>${n ? `<b class="nbdg">${n}</b>` : ''}</button><button class="btn admb" data-act="go" data-v="admin">${ic('gear')}<span>الآبار والإعدادات</span></button><button class="btn admb" data-act="go" data-v="audit">${ic('hist')}<span>سجل التعديلات</span></button></div><button class="btn wide" style="margin-top:8px" data-act="go" data-v="rep">${ic('dl')} تحديث من التقارير</button></div>`; }
-    else if (canWells()) h += `<div class="card"><h3 style="margin:0 0 8px">الآبار</h3><div class="btns"><button class="btn pen" data-act="go" data-v="rep">${ic('dl')} تحديث من التقارير</button><button class="btn" data-act="go" data-v="admin">بيانات الآبار</button></div></div>`;
+    else if (canWells()) h += `<div class="card"><h3 style="margin:0 0 8px">المهندس</h3><div class="btns"><button class="btn pen" data-act="go" data-v="rep">${ic('dl')} تحديث من التقارير</button><button class="btn" data-act="go" data-v="admin">${ic('gear')} الآبار والإعدادات</button></div></div>`;
     if ((S.errs || []).length) h += `<div class="card"><h3 style="margin:0 0 6px">سجل الأخطاء (${S.errs.length})</h3><p class="mute" style="margin-top:0">التطبيق قابل مشكلة. ابعتلي السجل ده، وبعد ما يتبعت بيتمسح.</p><button class="btn wide" data-act="errsend">ابعت سجل الأخطاء</button></div>`;
     h += `<div class="card"><h3 style="margin:0 0 6px">نسخة احتياطية</h3><p class="mute" style="margin-top:0">${SYNC.url() ? 'الداتا بتتبعت للشيت لوحدها. النسخة دي لو حبيت تحتفظ بملف على جنب.' : 'لحد ما الموبايل يتربط بالشيت، الداتا عليه بس. ابعت نسخة كل كام يوم.'}</p><button class="btn wide" data-act="backup">ابعت نسخة احتياطية</button></div>`;
     return h + '</main>' + tabs('settings');
   }
-  // the required fields (★) of each well type: the admin taps a field to make it required or not
+  // the required fields (★) of each well type: the engineer or the admin taps a field to make it required or not
   const reqOf = t => (S.cfg.req && Array.isArray(S.cfg.req[t]) ? S.cfg.req[t] : L.TYPES[t].req).filter(k => L.TYPES[t].f.includes(k));
   function reqCard() {
     let h = `<div class="card"><h3 style="margin:0 0 4px">الخانات الإجبارية <small class="mute">★</small></h3><p class="mute" style="margin:0 0 8px">البير ياخد ✓ لما الخانات دي كلها تتكتب. دوس على الخانة تخليها إجبارية أو لأ. في الـ Gas Lift: DS وDiff للآبار اللي ليها فاكتور، وGas للقراية المباشرة.</p>`;
@@ -1660,12 +1735,12 @@
   }
   function vAdmin() {
     const aid = V.a || SEED.areas[0].id, q = (V.q || '').trim().toUpperCase();
-    let h = top(isAdmin() ? 'الآبار والإعدادات' : 'بيانات الآبار', isAdmin() ? 'الأدمن بس' : 'المهندس', 'settings') + '<main class="wrap">';
-    if (isAdmin()) h += `<div class="card"><h3 style="margin:0 0 8px">الإعدادات</h3><div class="two"><div><label class="lab">يوم الإنتاج بيبدأ الساعة</label><input class="in" id="ch" inputmode="numeric" value="${S.cfg.prodDayStart}"></div><div><label class="lab">تنبيه الديزل تحت %</label><input class="in" id="cd" inputmode="numeric" value="${S.cfg.dieselMin}"></div></div>
+    let h = top('الآبار والإعدادات', isAdmin() ? 'الأدمن' : 'المهندس', 'settings') + '<main class="wrap">';
+    if (canWells()) h += `<div class="card"><h3 style="margin:0 0 8px">الإعدادات</h3><div class="two"><div><label class="lab">يوم الإنتاج بيبدأ الساعة</label><input class="in" id="ch" inputmode="numeric" value="${S.cfg.prodDayStart}"></div><div><label class="lab">تنبيه الديزل تحت %</label><input class="in" id="cd" inputmode="numeric" value="${S.cfg.dieselMin}"></div></div>
       <div class="two" style="margin-top:10px"><div><label class="lab">تنبيه فرق الجاز عن التارجت %</label><input class="in" id="cg" inputmode="numeric" value="${S.cfg.gasDiffPct}"></div><div></div></div>
       <p class="lab" style="margin-top:12px">تنبيه الكيميكال تحت %</p><div class="cmins">${L.CHEMS.map(([c, n]) => `<label class="cmin"><bdi dir="ltr">${esc(n)}</bdi><input class="in" data-cmin="${c}" inputmode="numeric" value="${L.chemMin(S.cfg, c)}"></label>`).join('')}</div>
       <button class="btn pen wide" style="margin-top:12px" data-act="cfgsave">حفظ</button></div>`;
-    if (isAdmin()) h += reqCard();
+    if (canWells()) h += reqCard();
     if (isAdmin()) h += `<div class="card"><h3 style="margin:0 0 8px">الربط بالشيت</h3><label class="lab">رابط الشيت (Web app URL)</label><input class="in" id="surl" dir="ltr" value="${esc(SYNC.url())}" placeholder="https://script.google.com/macros/s/…/exec"><button class="btn pen wide" style="margin-top:8px" data-act="surlsave">حفظ وجرّب</button><p style="margin:10px 0 0" data-sync>${syncLine()}</p></div>`;
     if (isAdmin() && SYNC.url() && !(window.CONFIG && CONFIG.web)) h += `<div class="card"><h3 style="margin:0 0 6px">نسخة الآيفون والكمبيوتر</h3><p class="mute" style="margin:0 0 10px">ابعت اللينك ده للي عاوز يشتغل من آيفون أو كمبيوتر. بيفتح البرنامج مربوط بالشيت، وبيانات الآبار بتنزل بعد ما يفتحه. اللينك ده زي باسورد للشيت، متبعتوش غير لناس الشغل.</p>
       <div class="btns"><button class="btn wa" data-act="weblinkshare">${ic('share')} ابعته</button><button class="btn" data-act="weblinkcopy">انسخ</button></div><p class="mute" style="margin:8px 0 0">${S.seedPub === SEED.version ? 'بيانات الآبار متحدثة على الشيت.' : 'بيانات الآبار هتتبعت للشيت مع أول إرسال.'}</p></div>`;
@@ -1673,7 +1748,7 @@
       <div class="search"><input id="aq" placeholder="دوّر على بير" value="${esc(V.q || '')}" dir="ltr"></div>
       <p class="mute" style="margin:10px 2px 0">"يظهر" يعني الفنيين يشوفوه في قايمة المنطقة. البير المخفي بيفضل بالداتا بتاعته وترجعه في أي وقت. تغيير النوع بيغيّر الخانات اللي الفني بيشوفها. ${SYNC.url() ? 'أي تغيير هنا بيوصل لكل الموبايلات أول ما يتبعت للشيت.' : 'التغيير هيوصل لكل الموبايلات لما الموبايل ده يتربط بالشيت.'}</p><div class="card">`;
     const ws = WELLS.filter(w => w.a === aid && (!q || w.n.toUpperCase().includes(q)));
-    h += `<h3 style="margin:4px 0 8px">الآبار <small class="mute">بترتيب الطريق</small></h3>${isAdmin() ? `<button class="btn pen wide" style="margin-bottom:8px" data-act="nwell">+ بير جديد في ${esc(areaOf(aid).n)}</button>` : ''}`;
+    h += `<h3 style="margin:4px 0 8px">الآبار <small class="mute">بترتيب الطريق</small></h3>${canWells() ? `<button class="btn pen wide" style="margin-bottom:8px" data-act="nwell">+ بير جديد في ${esc(areaOf(aid).n)}</button>` : ''}`;
     h += ws.map(w => `<div class="arow"><div class="nm">${esc(w.n)}<small>${w.add ? 'بير جديد' : w.geo ? 'اتنسب بالإحداثيات' : 'من ورقة السيرفاي'}${(w.ch || []).length ? ' · كيميكال ' + w.ch.length : ''}</small></div>
       <select class="in tsel" data-type="${w.id}">${L.TYPE_ORDER.map(t => `<option value="${t}" ${w.t === t ? 'selected' : ''}>${t === 'GL' ? 'Gas Lift' : t}</option>`).join('')}</select>
       <div class="tgi">${tg2(`data-int="${w.id}"`, w.int, 'متقطع', 'مستمر', 0)}</div>
@@ -1717,7 +1792,7 @@
       <div id="wbx"></div>
       <p class="lab" style="margin-top:12px">الكيميكال اللي على البير</p>${L.CHEMS.map(([c, n]) => `<label class="ck"><input type="checkbox" data-wch="${c}" ${(w.ch || []).includes(c) ? 'checked' : ''}><bdi dir="ltr">${esc(n)}</bdi></label>`).join('')}
       <label class="lab" style="margin-top:12px">مكانه في ترتيب الطريق: ييجي بعد</label>${wpHtml({ ws: ws.filter(x => x.id !== w.id), first: 'أول بير في الطريق', sel: [i > 0 ? ws[i - 1].id : '__first'] })}
-      ${w.add && isAdmin() ? '<button class="btn danger wide" style="margin-top:12px" data-act="wdel">امسح البير ده</button>' : ''}
+      ${w.add && canWells() ? '<button class="btn danger wide" style="margin-top:12px" data-act="wdel">امسح البير ده</button>' : ''}
       <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="weditok">حفظ</button></div>`);
     wbType(); $('#wbt').onchange = wbType;
   }
@@ -1850,12 +1925,12 @@
       case 'sclear': V.sw = null; V.spt = ''; return render();
       case 'pdf': return doPdf();
       case 'img': return doImages();
-      case 'nwell': return isAdmin() ? newWellBox(V.a || SEED.areas[0].id) : null;
-      case 'nwellok': return isAdmin() ? newWellOk() : null;
-      case 'repadd': return isAdmin() ? newWellBox(null, { n: b.dataset.n, t: b.dataset.t || '', g: b.dataset.g || '' }) : null;
+      case 'nwell': return canWells() ? newWellBox(V.a || SEED.areas[0].id) : null;
+      case 'nwellok': return canWells() ? newWellOk() : null;
+      case 'repadd': return canWells() ? newWellBox(null, { n: b.dataset.n, t: b.dataset.t || '', g: b.dataset.g || '' }) : null;
       case 'wedit': return canWells() ? wellBox(b.dataset.w) : null;
       case 'weditok': return canWells() ? wellEditOk() : null;
-      case 'wdel': return isAdmin() ? wellDel() : null;
+      case 'wdel': return canWells() ? wellDel() : null;
       case 'repfile': { const i = $('#rpf'); if (i) i.click(); return; }
       case 'repok': return repApply();
       case 'repclear': RP = null; return render();
@@ -1864,6 +1939,8 @@
       case 'tg2': { const g = b.closest('.tg2'), box = g && g.querySelector('input'); if (!box) return; const v = b.dataset.v === '1';
         g.querySelectorAll('button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); });
         if (box.checked !== v) { box.checked = v; box.dispatchEvent(new Event('change', { bubbles: true })); } return; }
+      case 'rphs': { if (!RP || !RP.plan || !canWells()) return; RP.hs = RP.hs || {}; const t = b.dataset.t, w = b.dataset.w; if (t === 'own') { if (typeof RP.hs[w] !== 'number') RP.hs[w] = 'own'; } else RP.hs[w] = t;
+        const y = window.scrollY; RP.rec = repRecord(RP.plan, RP.files); render(); window.scrollTo(0, y); if (t === 'own') { const i = document.querySelector(`[data-rphn="${CSS.escape(w)}"]`); if (i) i.focus(); } return; }
       case 'repshare': return repShare(b.dataset.d);
       case 'repdel': return repDel(b.dataset.d);
       case 'repday': return;
@@ -1877,9 +1954,9 @@
       case 'well': return openWell(b.dataset.w);
       case 'fclose': return closeForm();
       case 'wview': closeModal(); return openWell(b.dataset.w, null);
-      case 'rqt': { if (!isAdmin()) return; const t = b.dataset.t, k = b.dataset.k, cur = reqOf(t), nx = cur.includes(k) ? cur.filter(x => x !== k) : L.TYPES[t].f.filter(x => x === k || cur.includes(x));
+      case 'rqt': { if (!canWells()) return; const t = b.dataset.t, k = b.dataset.k, cur = reqOf(t), nx = cur.includes(k) ? cur.filter(x => x !== k) : L.TYPES[t].f.filter(x => x === k || cur.includes(x));
         S.cfg.req = Object.assign({}, S.cfg.req || {}, { [t]: nx }); mark('cs'); audit('cfg', 'الإعدادات', 'خانات إجبارية ' + t, cur.map(fname).join(', '), nx.map(fname).join(', '), curDay()); save(); const y = window.scrollY; render(); window.scrollTo(0, y); return; }
-      case 'rqdef': { if (!isAdmin()) return; S.cfg.req = {}; mark('cs'); audit('cfg', 'الإعدادات', 'خانات إجبارية', 'متعدلة', 'الافتراضي', curDay()); save(); const y = window.scrollY; render(); window.scrollTo(0, y); return toast('رجعت الافتراضي'); }
+      case 'rqdef': { if (!canWells()) return; S.cfg.req = {}; mark('cs'); audit('cfg', 'الإعدادات', 'خانات إجبارية', 'متعدلة', 'الافتراضي', curDay()); save(); const y = window.scrollY; render(); window.scrollTo(0, y); return toast('رجعت الافتراضي'); }
       case 'injm': if (!FM || formRo()) return; FM.v.INJM = b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b)); return commitReading();
       case 'rdfresh': { if (!FM || formRo()) return; const w = FM.w, d = viewDay(), r = dayObj(d).r[w.id]; if (!r) return; const now = Date.now(); r.ft = Object.fromEntries(Object.keys(r.v || {}).map(k => [k, now])); r.t = now; mark(`r|${d}|${w.id}`); audit(w.id, w.n, 'القراية بعد ما رجع', '', 'نفس الأرقام', d); save(); const nd = $('#need'); if (nd) nd.innerHTML = needHtml(w); return toast('اتسجلت إن القراية بعد ما البير رجع'); }
       case 'csg': if (!FM || formRo()) return; FM.v.CSG = FM.v.CSG === b.dataset.v ? '' : b.dataset.v; b.parentNode.querySelectorAll('button').forEach(x => x.classList.toggle('on', x.dataset.v === FM.v.CSG)); return commitReading();
@@ -1887,7 +1964,9 @@
         tin.querySelector('.th').value = night ? (H0 >= 18 ? H0 - 12 : H0 === 0 ? 12 : H0) : (H0 <= 12 ? H0 : H0 - 12); tin.querySelector('.tm').value = String(now.getMinutes()).padStart(2, '0');
         tin.querySelectorAll('.ampm button').forEach(x => x.classList.toggle('on', x.dataset.v === (night ? 'n' : 'd'))); return saveChemTime(tin); }
       case 'down': return downBox(FM.w);
-      case 'mdown': { const m = planFor(viewDay(), FM.w.a).maint.find(x => x.id === b.dataset.i); return downBox(FM.w, { r: 'Generator صيانة', mid: b.dataset.i, o: m && m.n ? m.n : '' }); }
+      case 'mdown': { const k = b.dataset.k === 'work' ? 'work' : 'maint', it = planFor(viewDay(), FM.w.a)[k].find(x => x.id === b.dataset.i); return it ? downBox(FM.w, jobPre(k, it)) : null; }
+      case 'jdown': { const w = WBY[b.dataset.w], k = b.dataset.k === 'work' ? 'work' : 'maint', it = w && planFor(viewDay(), w.a)[k].find(x => x.id === b.dataset.i); return it && editable() ? downBox(w, jobPre(k, it)) : null; }
+      case 'jup': { const w = WBY[b.dataset.w]; return w && editable() && L.openEvent(S.dt, w.id) ? upBox(w, false) : null; }
       case 'wpk': return wpPick(b.dataset.w);
       case 'downok': return downOk();
       case 'up': return upBox(FM.w, false);
@@ -1926,7 +2005,7 @@
       case 'evdel': return evDel();
       case 'intclose': return intClose();
       case 'mclose': return closeModal();
-      case 'mok': { const cb = MCB; if (cb) { closeModal(); cb(); } return; }
+      case 'mok': { const cb = MCB; if (!cb) return; if ($('#mt')) return cb(); closeModal(); cb(); return; }   // a box with a reason to write: it reads it, then closes itself
       case 'login': return doLogin();
       case 'register': return doRegister();
       case 'toreg': V = { v: 'home', auth: 'reg' }; render(); return window.scrollTo(0, 0);
@@ -1960,7 +2039,7 @@
       case 'repread': return canPlan() ? doRepRead() : null;
       case 'backup': return backup();
       case 'aarea': V.a = b.dataset.a; V.q = ''; return render();
-      case 'cfgsave': {
+      case 'cfgsave': { if (!canWells()) return;
         const h = parseInt(L.normNum($('#ch').value), 10), dm = parseFloat(L.normNum($('#cd').value)), g = parseFloat(L.normNum($('#cg').value));
         if (!(h >= 0 && h <= 23)) return toast('الساعة من 0 لـ 23'); if (!(dm > 0 && dm < 100) || !(g > 0 && g < 100)) return toast('راجع النسب');
         const cm = {}; for (const el of document.querySelectorAll('[data-cmin]')) { const v = parseFloat(L.normNum(el.value)); if (!(v >= 0 && v < 100)) return toast('نسب الكيميكال من 0 لـ 99'); cm[el.dataset.cmin] = v; }
@@ -2010,12 +2089,17 @@
       if (t.dataset.ftk) { if (formRo()) return; const v = L.normNum(t.value).trim(), x = L.toNum(v); if (v !== '' && (x == null || x < 0 || x > 100)) { t.classList.add('bad'); return toast('نسبة الديزل لازم تبقى من 0 لـ 100'); }
         t.classList.remove('bad'); if (setTank(t.dataset.ftk, v, viewDay(), FM.why, FM)) { save(); savedTick(); if (x != null && x < S.cfg.dieselMin) toast(`الديزل تحت ${S.cfg.dieselMin}%`); } return; }
     }
-    if (t.id === 'vday') { VDAY = t.value && t.value !== curDay() ? t.value : null; return render(); }
+    if (t.id === 'vday') { if (!canWells()) return; VDAY = t.value && t.value !== curDay() ? t.value : null; return render(); }
     if (t.dataset.vis) { if (!canWells()) return; return setEdit(t.dataset.vis, 'hid', t.checked ? 0 : 1); }
     if (t.dataset.int) { if (!canWells()) return; return setEdit(t.dataset.int, 'int', t.checked ? 1 : 0); }
     if (t.dataset.type) { if (!canWells()) return; setEdit(t.dataset.type, 't', t.value); return toast('اتغير النوع'); }
     if (t.id === 'rpf') return repRead(t.files);
-    if (t.id === 'rpday') { if (RP) { RP.day = t.value || RP.day; repPlanNow(); render(); } return; }
+    if (t.id === 'rpday') { if (RP) { RP.day = t.value || RP.day; RP.hs = {}; repPlanNow(); render(); } return; }
+    if (t.dataset.rphn) { if (!RP || !RP.plan || !canWells()) return; const v = L.normNum(t.value).trim(), x = L.toNum(v); RP.hs = RP.hs || {};
+      if (v === '') { RP.hs[t.dataset.rphn] = 'own'; t.classList.remove('bad'); return; }
+      if (x == null || x < 0 || x > 24) { t.classList.add('bad'); RP.hs[t.dataset.rphn] = 'own'; return toast('الساعات من 0 لـ 24'); }
+      if (x !== Math.round(x)) { t.classList.add('bad'); RP.hs[t.dataset.rphn] = 'own'; return toast('من غير كسور: ساعات كاملة'); }
+      t.classList.remove('bad'); RP.hs[t.dataset.rphn] = x; RP.rec = repRecord(RP.plan, RP.files); return; }
     if (t.id === 'avd') { V.avd = t.value || null; const s = $('#avs'); if (s) s.innerHTML = avStatus(avDay()); return; }
     if (t.dataset.task) { const aid = t.dataset.a || V.a, pl = planObj(viewDay(), aid), x = pl.tasks.find(q => q.id === t.dataset.task); if (!x) return; x.done = t.checked ? stampBy() : null; mark(`pt|${viewDay()}|${aid}|${x.id}`); audit('plan', areaOf(aid).n, 'مهمة', t.checked ? '' : 'خلصت', t.checked ? 'خلصت: ' + x.x : x.x, viewDay()); save(); return render(); }
     if (t.id === 'jk') { const w = $('#jkw'); if (w) { w.hidden = t.value !== '__o'; if (!w.hidden) $('#jko').focus(); } return; }

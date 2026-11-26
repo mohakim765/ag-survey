@@ -56,8 +56,10 @@
       if ((A.copyA || []).includes(p) && l && l !== 'A' && (!x || x.d < day)) { const a = one('A'); if (a && a.d === day) return { v: a.v, d: a.d, a: 1 }; }
       return x;
     }
-    // the app's stops in the day: the hours the well was down (a stop still open counts to the day's end) and the cause of
-    // its longest stop that has one (with the technician's words when he wrote his own)
+    /* the app's stops in the day: the hours the well was down (a stop still open counts to the day's end), in whole hours
+       rounded up (L.wholeH: the reports have no fractions), and the cause of its longest stop that has one (with the
+       technician's words when he wrote his own). The hours an approved report set for the well that day come first. */
+    const fixes = (S.hfix || {})[day] || {};
     function appHours(w) {
       const iv = []; let main = '', note = '', longest = -1;
       for (const e of S.dt || []) {
@@ -68,7 +70,9 @@
       iv.sort((x, y) => x[0] - y[0]); let down = 0, cur = null;
       for (const [a, b] of iv) { if (!cur || a > cur[1]) { if (cur) down += cur[1] - cur[0]; cur = [a, b]; } else cur[1] = Math.max(cur[1], b); }
       if (cur) down += cur[1] - cur[0];
-      return { h: r2(Math.max(0, 24 - down / 3600000)), c: main, o: note };
+      const fx = fixes[w.id];
+      if (fx && typeof fx.h === 'number') return { h: Math.max(0, Math.min(24, fx.h)), c: fx.h < 24 ? main || fx.c || '' : '', o: fx.h < 24 ? note : '', fx: 1 };
+      return { h: Math.max(0, 24 - Math.min(24, L.wholeH(down))), c: main, o: note };
     }
     function fromRec(rec, row, w) {
       if (!rec) return null; let x = w && rec.wh && rec.wh[w.id];
@@ -78,7 +82,7 @@
     // the hours: the app's stops for the wells the technicians see (an approved report reaches them by closing and opening
     // wells); the wells hidden from them and the ones the app does not have: the newest approved report, else the old workbook
     function hours(row, w) {
-      if (w && !w.hid) { const a = appHours(w); return { h: a.h, c: a.c, o: a.o, src: 'البرنامج', d: day }; }
+      if (w && !w.hid) { const a = appHours(w); return { h: a.h, c: a.c, o: a.o, src: a.fx ? 'البرنامج (اتعدلت من التقرير)' : 'البرنامج', d: day }; }
       for (const d of repDays) { const x = fromRec(reps[d], row, w); if (x) return { h: x[0], c: x[1], src: d === day ? 'تقرير اليوم' : 'آخر تقرير', d }; }
       if (row.h && row.h[0] != null) return { h: row.h[0], c: row.h[1], src: 'الشيت القديم', d: A.v };
       return null;

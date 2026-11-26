@@ -72,7 +72,7 @@
     const pl = (S.plan || {})[day + '|' + aid]; if (pl) for (const n of pl.staff) ops.add(String(n).split(' · ')[0]);
     P.infoBox([['Survey Area', a.full + '  (' + a.n + ')'], ['Date', day + '  (from ' + String(h).padStart(2, '0') + ':00)'], ['Operator Name', [...ops].join(' · ') || '—']]);
     const num = v => { if (v == null || v === '') return ''; const x = L.toNum(v); return x == null ? v : x; };
-    const status = w => { const e = S.dt.find(x => x.w === w.id && x.s <= endT && (x.e == null || x.e > endT)); if (e) return { t: 'Down · ' + e.r, down: true }; const u = L.uptime(S.dt, w.id, day, h, now); return u.down > 0 ? { t: `On ${u.up}h`, warn: true } : ''; };
+    const status = w => { const e = S.dt.find(x => x.w === w.id && x.s <= endT && (x.e == null || x.e > endT)); if (e) return { t: 'Down · ' + e.r, down: true }; const u = L.uptime(S.dt, w.id, day, h, now, L.hfixOf(S, day, w.id)); return u.down > 0 ? { t: `On ${u.up}h`, warn: true } : ''; };
     const dsl = w => { const v = tanks.filter(t => t.w.includes(w.id)).map(t => D.d[t.id] ? D.d[t.id].v : '').filter(x => x !== ''); if (!v.length) return ''; const low = v.some(x => L.toNum(x) < S.cfg.dieselMin); return { t: v.join('-') + '%', warn: low }; };
     const csg = v => v === 'F' ? 'Flare' : v === 'P' ? 'Prod.' : v === 'C' ? 'Closed' : '';
     const order = ['NF', 'PL', 'ESP', 'SRP', 'WSW', 'WIW', 'GL'];
