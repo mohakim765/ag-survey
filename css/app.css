@@ -531,3 +531,8 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .wfxi{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:13px}
 .wfxi span{min-width:96px}
 .wfxi .in{flex:1}
+/* the email on a computer: the page as wide as the email, the buttons side by side */
+.wrap.pmwide{max-width:1480px}
+.pmbtns{flex-wrap:wrap}
+.pmbtns .btn{flex:1 1 200px}
+.pmhow{margin:10px 0 6px;padding-inline-start:22px;line-height:1.7}

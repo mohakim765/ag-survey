@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.26';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.27';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1650,6 +1650,8 @@
   }
   // ---------------- the daily email «AG Production Activity» (PMAIL builds it) ----------------
   const pmDay = () => V.pmd || curDay();
+  // a computer (the web version with a mouse and a wide screen): the email is downloaded and opened in Outlook there
+  const pmDesk = () => !Cap && !!window.matchMedia && matchMedia('(pointer:fine)').matches && window.innerWidth >= 900;
   const rotNow = () => S.cfg.irot || SEED.irot || null;
   // the water-flood network: the engineer's WF sheet (the seed), with the design capacities and wells supported he changed
   const wfNet = () => { const n = SEED.wf || { src: [], inj: [] }, x = S.cfg.wfx || {}, dd = x.d || {}, ss = x.s || {};
@@ -1665,13 +1667,17 @@
     try { m = pmBuild(d); } catch (e) { return top('ميل الإنتاج', '', 'export') + `<main class="wrap"><div class="banner">حصلت مشكلة في الميل: ${esc(e.message || e)}</div></main>` + tabs('export'); }
     PM = { d, m };
     const n = m.notes;
-    let h = top('ميل الإنتاج', `<bdi dir="ltr">${esc(m.subject)}</bdi>`, 'export').replace('data-act="go" data-v="export"', `data-act="pmback"`) + '<main class="wrap">';
+    const desk = pmDesk();
+    let h = top('ميل الإنتاج', `<bdi dir="ltr">${esc(m.subject)}</bdi>`, 'export').replace('data-act="go" data-v="export"', `data-act="pmback"`).replace('<div class="wrap">', `<div class="wrap${desk ? ' pmwide' : ''}">`) + `<main class="wrap${desk ? ' pmwide' : ''}">`;
     h += `<div class="card"><p style="margin:0 0 4px">رايح لـ ${m.to.length} في To و${m.cc.length} في Cc، زي آخر ميل.</p>
       ${n.old ? `<p class="hfx" style="margin:0 0 4px">${n.old} بير في جدول الـ WF ملهمش قراية النهارده: متعلّمين بالأصفر بآخر قراية.</p>` : ''}
       <p class="mute" style="margin:0 0 10px">${n.jobs ? `${n.jobs} شغل من مهام المهندس فوق الميل.` : 'مفيش مهام للمهندس اليوم ده: أول الميل فاضي تكتبه.'}</p>
-      <button class="btn pen wide" data-act="pmsend">${ic('share')} ابعت الميل كملف</button>
+      ${desk ? `<div class="btns pmbtns"><button class="btn pen" data-act="pmsend">${ic('dl')} نزّل الميل وافتحه في Outlook</button><button class="btn" data-act="pmcopy">انسخ الميل</button><button class="btn" data-act="pmsubj">انسخ العنوان</button></div>
+      <ol class="pmhow"><li>دوس «نزّل الميل»، وافتح الملف اللي نزل (من تحت في المتصفح، أو من Downloads).</li><li>بيفتح في Outlook ميل جديد فيه العنوان والناس والجداول.</li><li>كمّل اللي بالأصفر، وعدّل اللي محتاجه، ودوس Send.</li></ol>
+      <p class="mute" style="margin-bottom:0">لو الملف فتح في Outlook كميل للقراية بس: دوس «انسخ الميل»، وافتح ميل جديد في Outlook، والزق بـ Ctrl+V، وحط العنوان بـ «انسخ العنوان» والناس.</p></div>`
+      : `<button class="btn pen wide" data-act="pmsend">${ic('share')} ابعت الميل كملف</button>
       ${Cap ? '' : '<button class="btn wide" style="margin-top:8px" data-act="pmcopy">انسخ الميل وألزقه في Outlook</button>'}
-      <p class="mute" style="margin-bottom:0">ابعت الملف لميل الشركة بتاعك، وافتحه على الكمبيوتر: بيفتح في Outlook ميل جديد فيه العنوان والناس والجداول. كمّل اللي بالأصفر وعدّل اللي محتاجه ودوس Send.</p></div>`;
+      <p class="mute" style="margin-bottom:0">ابعت الملف لميل الشركة بتاعك، وافتحه على الكمبيوتر: بيفتح في Outlook ميل جديد فيه العنوان والناس والجداول. كمّل اللي بالأصفر وعدّل اللي محتاجه ودوس Send.</p></div>`}`;
     h += `<div class="pmv" id="pmv"><iframe id="pmf" title="الميل" sandbox="allow-same-origin" srcdoc="${esc(m.html)}"></iframe></div>`;
     return h + '</main>' + tabs('export');
   }
@@ -1690,9 +1696,10 @@
   }
   async function pmCopy() {
     if (!PM) return;
-    try { await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([PM.m.html], { type: 'text/html' }), 'text/plain': new Blob([PM.m.subject], { type: 'text/plain' }) })]); toast('اتنسخ: افتح ميل جديد في Outlook ودوس Ctrl+V'); }
+    try { await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([PM.m.body], { type: 'text/html' }), 'text/plain': new Blob([PM.m.subject], { type: 'text/plain' }) })]); toast('اتنسخ: افتح ميل جديد في Outlook ودوس Ctrl+V'); }
     catch (e) { toast('مقدرتش أنسخ: ابعت الملف بدل كده'); }
   }
+  async function pmSubj() { if (PM) copyText(PM.m.subject); }
   // the intermittent rotation: two groups, one opened each day; the engineer says which opens that day and edits the groups
   let IR = null;   // the rotation being edited
   function irotBox() {
@@ -2131,6 +2138,7 @@
       case 'pmback': return go('export', { pmd: V.pmd });
       case 'pmsend': return canPlan() ? pmSend() : null;
       case 'pmcopy': return canPlan() ? pmCopy() : null;
+      case 'pmsubj': return canPlan() ? pmSubj() : null;
       case 'irot': IR = null; return irotBox();
       case 'irpick': { if (!IR) return; IR.op = $('#irop') && $('#irop').checked ? 'a' : 'b'; IR.on = $('#iron') && $('#iron').checked ? 1 : 0; IR.open = IR.op; return irotPick(b.dataset.k); }
       case 'irpickok': { if (!IR || !WP) return; const k = b.dataset.k === 'b' ? 'b' : 'a', o = k === 'a' ? 'b' : 'a'; IR[k] = WP.sel.filter(id => id && id !== '__first'); IR[o] = IR[o].filter(id => !IR[k].includes(id)); return irotBox(); }

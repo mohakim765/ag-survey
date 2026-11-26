@@ -2,7 +2,7 @@
    wells, the intermittent wells opened and shut in, the deferred production (the day's downtime against yesterday's), the
    water-flood network (the engineer's WF dashboard), the samples. What the app does not know stays "**" in yellow, as the
    engineers mark what is left to fill; the engineer finishes it in Outlook.
-   build(o) -> { subject, html, to, cc, notes }; eml(m) -> the text of an .eml that Outlook opens as a new email. */
+   build(o) -> { subject, html, body (the html inside <body>, to paste), to, cc, notes }; eml(m) -> the text of an .eml that Outlook opens as a new email. */
 (function (root) {
   'use strict';
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -180,7 +180,7 @@
     h += `<p style="margin:18px 0 0;${F}font-size:12pt;font-weight:bold;text-decoration:underline">Production Eng. Dept.<br>Eastern Area - AG Field.</p></div>`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>AG Production Activity ${dmy(day)}</title></head><body style="margin:8px">${h}</body></html>`;
     const pm = o.pmail || { to: [], cc: [] };
-    return { subject: `AG Production Activity ${dmy(day)}`, html, to: pm.to || [], cc: pm.cc || [],
+    return { subject: `AG Production Activity ${dmy(day)}`, html, body: h, to: pm.to || [], cc: pm.cc || [],
       notes: { jobs: J.length, rows: D.rows.length, rot: !!D.rot, wf: W.length, old: wf.old, total: D.total } };
   }
 
