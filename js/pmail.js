@@ -98,21 +98,21 @@
 
   // ---------------- the HTML (inline styles: Outlook keeps those) ----------------
   const F = 'font-family:Calibri,Arial,sans-serif;';
-  const HL = 'background:#FFFF00;';                       // what the engineer still has to fill
+  const HL = 'background:#FFF2CC;color:#77510B;font-weight:bold;';   // what the engineer still has to fill (the palette's soft amber)
   const hl = s => `<span style="${HL}">${esc(s)}</span>`;
   const txt = s => String(s).split(/(\*\*+)/).map(p => /^\*\*+$/.test(p) ? hl(p) : esc(p)).join('');
-  const title = s => `<p style="margin:16px 0 6px;${F}font-size:16pt;font-weight:bold;text-decoration:underline;color:#C00000">${esc(s)}</p>`;
+  const title = s => `<p style="margin:20px 0 8px;padding-bottom:3px;${F}font-size:14pt;font-weight:bold;color:#294B5C;border-bottom:2px solid #CFDAE2">${esc(s)}</p>`;
   // (the comments and the tables in the colours of the engineer's WF dashboard)
-  const head = s => `<p style="margin:14px 0 4px;${F}font-size:12pt;font-weight:bold;text-decoration:underline;color:#294B5C">${txt(s)}</p>`;
+  const head = s => `<p style="margin:12px 0 3px;${F}font-size:11.5pt;font-weight:bold;color:#2F566A">${txt(s)}</p>`;
   const bullets = list => `<ul style="margin:0 0 0 24px;padding:0;color:#6B8493">${list.map(b => `<li style="${F}font-size:11pt;color:#243746;margin:1px 0">${txt(b)}</li>`).join('')}</ul>`;
   const line = s => `<p style="margin:0;${F}font-size:11pt;color:#243746">${s}</p>`;
 
   function deferredHtml(D) {
     const th = (s, al) => `<th style="${F}font-size:10pt;font-weight:bold;color:#FFFFFF;background:${C.h1};border:1px solid ${C.group};padding:5px 8px;text-align:${al || 'center'}">${s}</th>`;
     const td = (s, o) => `<td${o.cs ? ` colspan="${o.cs}"` : ''} style="${F}font-size:10pt;color:${o.fg || C.ink};background:${o.bg || '#FFFFFF'};${o.b ? 'font-weight:bold;' : ''}border:1px solid ${C.rule};padding:4px 8px;text-align:${o.al || 'center'};vertical-align:middle">${s}</td>`;
-    // the hours down (none: plain; a whole day: the zero colour), the oil against yesterday (more: green; less: red)
-    const dt = (v, bg) => td(String(v), v >= 24 ? { bg: C.zero[0], fg: C.zero[1], b: 1 } : v > 0 ? { bg: C.hrs[0], fg: C.hrs[1], b: 1 } : { bg });
-    const diff = (v, o) => { if (v == null) return td(hl('**'), o); const r = Math.round(v); return r > 0 ? td('+' + n0(r), Object.assign({}, o, { bg: C.good[0], fg: C.good[1], b: 1 })) : r < 0 ? td(n0(r), Object.assign({}, o, { bg: C.zero[0], fg: C.zero[1], b: 1 })) : td('0', Object.assign({}, o, { bg: C.na[0], fg: C.na[1] })); };
+    // the hours down in bold; the oil against yesterday: more in green, less in red, none in grey (the text only: calm)
+    const dt = (v, bg) => td(String(v), v > 0 ? { bg, b: 1 } : { bg, fg: C.na[1] });
+    const diff = (v, o) => { if (v == null) return td(hl('**'), o); const r = Math.round(v); return r > 0 ? td('+' + n0(r), Object.assign({}, o, { fg: C.good[1], b: 1 })) : r < 0 ? td(n0(r), Object.assign({}, o, { fg: C.zero[1], b: 1 })) : td('0', Object.assign({}, o, { fg: C.na[1] })); };
     let h = `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse;min-width:680px"><tr>${th('Well')}${th('DT<br>Hrs.')}${th('Remarks', 'left')}${th('Oil<br>Diff.')}</tr>`;
     D.rows.forEach((r, i) => { const bg = i % 2 ? C.alt : '#FFFFFF'; h += `<tr>${td(txt(r.n), { bg, fg: C.name, b: 1 })}${dt(r.dt, bg)}${td(txt(r.r), { bg, al: 'left' })}${diff(r.diff, { bg })}</tr>`; });
     h += `<tr>${td('Total Oil Diff.', { cs: 3, bg: C.soft, b: 1, al: 'right' })}${diff(D.total, { bg: C.soft, b: 1 })}</tr></table>`;
@@ -121,16 +121,16 @@
 
   // the WF dashboard: the colours of the engineer's sheet
   const C = { ink: '#243746', name: '#2F566A', rule: '#CFDAE2', group: '#6B8493', h1: '#365B6D', h2: '#426D7E', soft: '#EAF2F7', alt: '#F5F8FA',
-    good: ['#BFDCC8', '#21553A'], part: ['#FFE1A3', '#77510B'], zero: ['#EDC2BF', '#863F3A'], na: ['#DCE2E6', '#5F6C75'], hrs: ['#FFF2CC', '#9C6500'], miss: ['#FFE1A3', '#77510B'], old: ['#FFFF00', '#243746'] };
+    good: ['#BFDCC8', '#21553A'], part: ['#FFE1A3', '#77510B'], zero: ['#EDC2BF', '#863F3A'], na: ['#DCE2E6', '#5F6C75'], hrs: [null, '#9C6500'], miss: [null, '#9C6500'], old: ['#FFF2CC', '#77510B'] };
   function wfHtml(rows, day) {
     const th = (s, bg) => `<th style="${F}font-size:10pt;font-weight:bold;color:#FFFFFF;background:${bg};border:1px solid ${C.group};padding:4px 6px;text-align:center">${s}</th>`;
-    const cell = (s, o) => `<td${o.rs ? ` rowspan="${o.rs}"` : ''} style="${F}font-size:10pt;color:${o.fg || C.ink};background:${o.bg || '#FFFFFF'};${o.b ? 'font-weight:bold;' : ''}border:1px solid ${C.rule};${o.top ? `border-top:2px solid ${C.group};` : ''}padding:3px 6px;text-align:${o.al || 'center'};vertical-align:middle">${s}</td>`;
+    const cell = (s, o) => `<td${o.rs ? ` rowspan="${o.rs}"` : ''} style="${F}font-size:10pt;color:${o.fg || C.ink};background:${o.bg || o.row || '#FFFFFF'};${o.b ? 'font-weight:bold;' : ''}border:1px solid ${C.rule};${o.top ? `border-top:2px solid ${C.group};` : ''}padding:3px 6px;text-align:${o.al || 'center'};vertical-align:middle">${s}</td>`;
     // a reading: the day's; the newest before it in yellow; none: Missing
-    const rd = (x, o) => x.miss ? cell('Missing', Object.assign({}, o, { bg: C.miss[0], fg: C.miss[1] })) : cell(n0(x.v), x.o ? Object.assign({}, o, { bg: C.old[0], fg: C.old[1] }) : o);
-    const pc = (p, o) => p == null ? cell('Missing', Object.assign({}, o, { bg: C.miss[0], fg: C.miss[1] })) : p === 'N/A' ? cell('N/A', Object.assign({}, o, { bg: C.na[0], fg: C.na[1] }))
+    const rd = (x, o) => x.miss ? cell('Missing', Object.assign({}, o, { bg: C.miss[0] || o.bg, fg: C.miss[1] })) : cell(n0(x.v), x.o ? Object.assign({}, o, { bg: C.old[0], fg: C.old[1] }) : o);
+    const pc = (p, o) => p == null ? cell('Missing', Object.assign({}, o, { bg: C.miss[0] || o.bg, fg: C.miss[1] })) : p === 'N/A' ? cell('N/A', Object.assign({}, o, { bg: C.na[0], fg: C.na[1] }))
       : cell((p * 100).toFixed(1) + '%', Object.assign({}, o, { b: 1 }, p >= 1 ? { bg: C.good[0], fg: C.good[1] } : p > 0 ? { bg: C.part[0], fg: C.part[1] } : { bg: C.zero[0], fg: C.zero[1] }));
-    const hr = (x, o) => x.miss ? cell('Missing', Object.assign({}, o, { bg: C.miss[0], fg: C.miss[1] })) : cell(String(x.v), x.v !== 24 ? Object.assign({}, o, { bg: C.hrs[0], fg: C.hrs[1], b: 1 }) : o);
-    const cz = (c, o) => cell(esc(c || '—'), c === 'Not recorded' ? Object.assign({}, o, { bg: C.hrs[0], fg: C.hrs[1], al: 'left' }) : Object.assign({}, o, { al: c && c !== '—' ? 'left' : 'center' }));
+    const hr = (x, o) => x.miss ? cell('Missing', Object.assign({}, o, { bg: C.miss[0] || o.bg, fg: C.miss[1] })) : cell(String(x.v), x.v !== 24 ? Object.assign({}, o, { bg: C.hrs[0] || o.bg, fg: C.hrs[1], b: 1 }) : o);
+    const cz = (c, o) => cell(esc(c || '—'), c === 'Not recorded' ? Object.assign({}, o, { fg: C.hrs[1], al: 'left' }) : Object.assign({}, o, { al: c && c !== '—' ? 'left' : 'center' }));
     let h = `<table cellspacing="0" cellpadding="0" style="border-collapse:collapse">
       <tr><td colspan="17" style="${F}font-size:13pt;font-weight:bold;color:#FFFFFF;background:#294B5C;padding:6px 8px">WATERFLOOD | DAILY ACTIVITY · ${esc(dmy(day))}</td></tr><tr>`;
     // (the source wells' design capacity and the percent of it: not exact, left out)
@@ -145,10 +145,10 @@
         if (top) {
           const so = { bg, top, rs: n };
           h += cell(esc(s.w.n), Object.assign({}, so, { fg: C.name, b: 1 })) + rd(s.whp, so) + rd(s.flp, so) + rd(s.amp, so) + rd(s.hz, so);
-          h += s.tot == null ? cell('Missing', Object.assign({}, so, { bg: C.miss[0], fg: C.miss[1] })) : cell(n0(s.tot), Object.assign({}, so, { bg: s.part ? '#FFF0D2' : C.soft, b: 1 }));
+          h += s.tot == null ? cell('Missing', Object.assign({}, so, { bg: C.miss[0] || so.bg, fg: C.miss[1] })) : cell(n0(s.tot), Object.assign({}, so, { bg: C.soft, fg: s.part ? C.hrs[1] : C.ink, b: 1 }));
           h += hr(s.h, so) + cz(s.c, Object.assign({}, so, { bg: C.soft }));
         }
-        if (x) h += cell(esc(x.w.n), Object.assign({}, o, { fg: C.name, b: 1 })) + rd(x.whip, o) + rd(x.csg, o) + (x.act.miss ? cell('Missing', Object.assign({}, o, { bg: C.miss[0], fg: C.miss[1] })) : cell(n0(x.act.v), Object.assign({}, o, x.act.o ? { bg: C.old[0], fg: C.old[1], b: 1 } : { bg: C.soft, b: 1 })))
+        if (x) h += cell(esc(x.w.n), Object.assign({}, o, { fg: C.name, b: 1 })) + rd(x.whip, o) + rd(x.csg, o) + (x.act.miss ? cell('Missing', Object.assign({}, o, { bg: C.miss[0] || o.bg, fg: C.miss[1] })) : cell(n0(x.act.v), Object.assign({}, o, x.act.o ? { bg: C.old[0], fg: C.old[1], b: 1 } : { bg: C.soft, b: 1 })))
           + cell(n0(x.tg), o) + pc(x.pct, o) + cell(esc(x.sup), Object.assign({}, o, { fg: C.name, b: 1, al: 'left' })) + hr(x.h, o) + cz(x.c, Object.assign({}, o, { bg: C.soft }));
         else h += cell('', o).repeat(9);
         h += '</tr>';
@@ -182,7 +182,7 @@
     if (water) h += line(`Collected water samples from wells: ( ${esc(water)} )`);
     h += line(`Collected diesel samples from wells: ( ${hl('**')} )`);
     h += title('Daily Production Survey:') + line('See the daily production survey report.');
-    h += `<p style="margin:18px 0 0;${F}font-size:12pt;font-weight:bold;text-decoration:underline;color:#294B5C">Production Eng. Dept.<br>Eastern Area - AG Field.</p></div>`;
+    h += `<p style="margin:18px 0 0;${F}font-size:11.5pt;font-weight:bold;color:#294B5C">Production Eng. Dept.<br>Eastern Area - AG Field.</p></div>`;
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>AG Production Activity ${dmy(day)}</title></head><body style="margin:8px">${h}</body></html>`;
     const pm = o.pmail || { to: [], cc: [] };
     return { subject: `AG Production Activity ${dmy(day)}`, html, body: h, to: pm.to || [], cc: pm.cc || [],
