@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.25';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.26';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1437,6 +1437,12 @@
       <button class="btn wide" data-act="avocet">${ic('dl')} طلّع شيت Avocet</button>
       <button class="btn wide" data-act="repread" style="margin-top:8px">${ic('dl')} طلّع قرايات التقرير</button>
       <p class="mute" style="margin-bottom:0">شيت Avocet: نفس تابات شيت السيرفاي القديم وأعمدته وترتيب آباره، ومعاه تابة المانيفولدات. قرايات التقرير: نفس صفوف وأعمدة تقرير الإنتاج، تلزقها في مكانها. البير اللي ملوش قراية في اليوم ده بياخد آخر قراية ليه وبتبقى صفرا، والخانة الحمرا ناقصة لازم تتراجع، وتابة «مراجعة» فيها كل خانة صفرا أو حمرا وجت منين. لو طلّعت شيت Avocet لنفس اليوم تاني، اللي اتغير من آخر مرة بيبقى أزرق.</p></div>`;
+    if (canPlan() && window.PMAIL && SEED.wf) h += `<div class="card"><h3 style="margin:0 0 6px">ميل الإنتاج اليومي</h3>
+      <label class="lab">يوم الإنتاج</label><input class="in" type="date" id="pmd" value="${pmDay()}" max="${d}">
+      <p class="avs" id="pms">${pmStatus(pmDay())}</p>
+      <button class="btn pen wide" data-act="pmail">${ic('share')} اعمل الميل</button>
+      <div class="btns" style="margin-top:8px"><button class="btn" data-act="irot">الآبار المتقطعة</button><button class="btn" data-act="wfx">شبكة الـ WF</button></div>
+      <p class="mute" style="margin-bottom:0">بنفس شكل ميل «AG Production Activity»: شغل المهندس على الآبار، والمتقطع، والـ Deferred Production، وجدول شبكة الـ WF، والعينات. اللي البرنامج مش عارفه بيفضل ** بالأصفر، تكمّله في Outlook.</p></div>`;
     return h + '</main>' + tabs('export');
   }
   // the Avocet sheet: for the production day that ended (the report of a day comes the next morning)
@@ -1641,6 +1647,90 @@
       h += `<section class="sec rsec ${cls}"><h3>${esc(title)} <small>${a.length}</small></h3>${a.map(x => x.i ? `<button class="wrow" data-act="well" data-w="${esc(x.i)}"><span class="wn">${esc(x.n)}</span><span class="ws">${esc(x.x)}</span><span class="wm"></span></button>` : `<div class="irow"><span class="nm">${esc(x.n)}<small>${esc(x.x)}</small></span></div>`).join('')}</section>`;
     }
     return h;
+  }
+  // ---------------- the daily email «AG Production Activity» (PMAIL builds it) ----------------
+  const pmDay = () => V.pmd || curDay();
+  const rotNow = () => S.cfg.irot || SEED.irot || null;
+  // the water-flood network: the engineer's WF sheet (the seed), with the design capacities and wells supported he changed
+  const wfNet = () => { const n = SEED.wf || { src: [], inj: [] }, x = S.cfg.wfx || {}, dd = x.d || {}, ss = x.s || {};
+    return { src: n.src.map(([id, v]) => [id, dd[id] != null ? dd[id] : v]), inj: n.inj.map(([id, s, sup]) => [id, s, ss[id] != null ? ss[id] : sup]) }; };
+  const pmBuild = d => PMAIL.build({ S, L, AV, A: SEED.avocet, wells: WELLS, day: d, H: H(), now: Date.now(), net: wfNet(), rot: rotNow(), testOf: w => (S.tests && S.tests[w.id]) || null, pmail: SEED.pmail });
+  function pmStatus(d) {
+    const r = PMAIL.rotOn(rotNow(), d, L), nm = ids => PMAIL.names(ids.map(id => WBY[id]).filter(Boolean));
+    return r ? `الآبار المتقطعة يوم ${esc(arDay(d))}: <b>بتتفتح</b> <bdi dir="ltr">${esc(nm(r.open))}</bdi>، و<b>بتتقفل</b> <bdi dir="ltr">${esc(nm(r.shut))}</bdi>.` : 'حركة الآبار المتقطعة واقفة: مش هتطلع في الميل.';
+  }
+  let PM = null;   // the email shown: { d, m }
+  function vPmail() {
+    const d = pmDay(); let m;
+    try { m = pmBuild(d); } catch (e) { return top('ميل الإنتاج', '', 'export') + `<main class="wrap"><div class="banner">حصلت مشكلة في الميل: ${esc(e.message || e)}</div></main>` + tabs('export'); }
+    PM = { d, m };
+    const n = m.notes;
+    let h = top('ميل الإنتاج', `<bdi dir="ltr">${esc(m.subject)}</bdi>`, 'export').replace('data-act="go" data-v="export"', `data-act="pmback"`) + '<main class="wrap">';
+    h += `<div class="card"><p style="margin:0 0 4px">رايح لـ ${m.to.length} في To و${m.cc.length} في Cc، زي آخر ميل.</p>
+      ${n.old ? `<p class="hfx" style="margin:0 0 4px">${n.old} بير في جدول الـ WF ملهمش قراية النهارده: متعلّمين بالأصفر بآخر قراية.</p>` : ''}
+      <p class="mute" style="margin:0 0 10px">${n.jobs ? `${n.jobs} شغل من مهام المهندس فوق الميل.` : 'مفيش مهام للمهندس اليوم ده: أول الميل فاضي تكتبه.'}</p>
+      <button class="btn pen wide" data-act="pmsend">${ic('share')} ابعت الميل كملف</button>
+      ${Cap ? '' : '<button class="btn wide" style="margin-top:8px" data-act="pmcopy">انسخ الميل وألزقه في Outlook</button>'}
+      <p class="mute" style="margin-bottom:0">ابعت الملف لميل الشركة بتاعك، وافتحه على الكمبيوتر: بيفتح في Outlook ميل جديد فيه العنوان والناس والجداول. كمّل اللي بالأصفر وعدّل اللي محتاجه ودوس Send.</p></div>`;
+    h += `<div class="pmv" id="pmv"><iframe id="pmf" title="الميل" sandbox="allow-same-origin" srcdoc="${esc(m.html)}"></iframe></div>`;
+    return h + '</main>' + tabs('export');
+  }
+  // the preview: the email at its width, scaled down to the screen
+  function pmFit() {
+    const v = $('#pmv'), f = $('#pmf'); if (!v || !f) return;
+    // (laid out at the width of a computer screen first: measured narrow, the tables would be squeezed)
+    const go = () => { try { const doc = f.contentDocument; if (!doc || !doc.body) return; f.style.width = '1400px';
+      const W = Math.max(doc.documentElement.scrollWidth, doc.body.scrollWidth, 1400), k = Math.min(1, v.clientWidth / W); f.style.width = W + 'px';
+      const Hh = Math.max(doc.documentElement.scrollHeight, doc.body.scrollHeight) + 20; f.style.height = Hh + 'px'; f.style.transform = `scale(${k})`; v.style.height = Math.ceil(Hh * k) + 'px'; } catch (e) { } };
+    f.addEventListener('load', go); go();
+  }
+  async function pmSend() {
+    if (!PM) return; const t = PMAIL.eml(PM.m), bytes = new TextEncoder().encode(t);
+    await shareFile(`AG_Production_Activity_${PMAIL.dmy(PM.d)}.eml`, bytes, 'message/rfc822');
+  }
+  async function pmCopy() {
+    if (!PM) return;
+    try { await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([PM.m.html], { type: 'text/html' }), 'text/plain': new Blob([PM.m.subject], { type: 'text/plain' }) })]); toast('اتنسخ: افتح ميل جديد في Outlook ودوس Ctrl+V'); }
+    catch (e) { toast('مقدرتش أنسخ: ابعت الملف بدل كده'); }
+  }
+  // the intermittent rotation: two groups, one opened each day; the engineer says which opens that day and edits the groups
+  let IR = null;   // the rotation being edited
+  function irotBox() {
+    if (!canPlan()) return;
+    const r = rotNow() || { a: [], b: [], ref: pmDay(), open: 'a', on: 1 }, d = pmDay(), on = PMAIL.rotOn(Object.assign({}, r, { on: 1 }), d, L);
+    IR = IR && IR.d === d ? IR : { a: r.a.slice(), b: r.b.slice(), open: on && on.open === r.b && r.b.length ? 'b' : 'a', on: r.on ? 1 : 0, d };
+    const grp = k => `<div class="irg"><div class="irh"><b>المجموعة ${k === 'a' ? 1 : 2}</b><button type="button" class="linkbtn" data-act="irpick" data-k="${k}">عدّل الآبار</button></div><p dir="ltr" class="irw">${esc(PMAIL.names(IR[k].map(id => WBY[id]).filter(Boolean)) || '—')}</p></div>`;
+    modal(`<h3>الآبار المتقطعة</h3><p class="mute" style="margin:0 0 8px">المجموعتين بيتبدّلوا كل يوم: واحدة بتتفتح (12 ساعة) والتانية مقفولة. البرنامج بيقلبهم لوحده كل يوم.</p>
+      ${grp('a')}${grp('b')}
+      <label class="lab">يوم ${esc(arDay(d))} بتتفتح</label>${tg2('id="irop"', IR.open === 'a', 'المجموعة 1', 'المجموعة 2', 0)}
+      <label class="lab" style="margin-top:10px">الحركة</label>${tg2('id="iron"', !!IR.on, 'شغالة', 'واقفة', 0)}
+      <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="irok">حفظ</button></div>`);
+  }
+  function irotPick(k) {
+    const pool = WELLS.filter(w => !w.hid && w.t !== 'WSW' && w.t !== 'WIW').sort((x, y) => L.natural(x.n, y.n));
+    modal(`<h3>المجموعة ${k === 'a' ? 1 : 2}</h3>${wpHtml({ ws: pool, multi: true, sel: IR[k].slice(), many: true })}
+      <div class="btns" style="margin-top:14px"><button class="btn" data-act="irback">رجوع</button><button class="btn pen" data-act="irpickok" data-k="${k}">تمام</button></div>`);
+  }
+  function irotOk() {
+    const op = $('#irop') && $('#irop').checked ? 'a' : 'b', on = $('#iron') && $('#iron').checked ? 1 : 0;
+    if (on && (!IR.a.length || !IR.b.length)) return toast('كل مجموعة لازم يبقى فيها بير على الأقل');
+    S.cfg.irot = Object.assign({ a: IR.a, b: IR.b, ref: IR.d, open: op, on, at: Date.now() }, stampBy()); mark('ir');
+    audit('', 'الآبار المتقطعة', 'حركة الآبار المتقطعة', '', on ? `يوم ${IR.d} بتتفتح المجموعة ${op === 'a' ? 1 : 2}` : 'واقفة', curDay());
+    IR = null; save(); closeModal(); render(); toast('اتحفظت');
+  }
+  // the water-flood network of the email: each source's design capacity, each injector's wells supported
+  function wfxBox() {
+    if (!canPlan()) return; const n = wfNet();
+    modal(`<h3>شبكة الـ WF</h3><p class="mute" style="margin:0 0 8px">الـ Design لكل بير مصدر، والآبار اللي كل بير حقن بيدعمها، زي شيت WF بتاعك. بيطلعوا في جدول الميل.</p>
+      ${n.src.map(([sid, des]) => { const w = WBY[sid]; return `<div class="wfxs"><div class="wfxh"><b dir="ltr">${esc(w ? w.n : sid)}</b><label>Design <input class="in" inputmode="numeric" data-wfd="${sid}" value="${esc(String(des))}"></label></div>
+        ${n.inj.filter(x => x[1] === sid).map(([iid, , sup]) => { const x = WBY[iid]; return `<label class="wfxi"><span dir="ltr">${esc(x ? x.n : iid)}</span><input class="in" dir="ltr" data-wfs="${iid}" value="${esc(sup)}" placeholder="Support for wells"></label>`; }).join('')}</div>`; }).join('')}
+      <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn pen" data-act="wfxok">حفظ</button></div>`);
+  }
+  function wfxOk() {
+    const n = SEED.wf || { src: [], inj: [] }, d = {}, s = {};
+    for (const el of document.querySelectorAll('[data-wfd]')) { const v = parseFloat(L.normNum(el.value)); if (!(v >= 0)) return toast('الـ Design رقم'); const o = n.src.find(x => x[0] === el.dataset.wfd); if (!o || o[1] !== v) d[el.dataset.wfd] = v; }
+    for (const el of document.querySelectorAll('[data-wfs]')) { const v = el.value.trim(), o = n.inj.find(x => x[0] === el.dataset.wfs); if (!o || o[2] !== v) s[el.dataset.wfs] = v; }
+    S.cfg.wfx = Object.assign({ d, s, at: Date.now() }, stampBy()); mark('wx'); save(); closeModal(); toast('اتحفظت');
   }
   function vRep() {
     let h = top('تحديث من التقارير', 'المهندس والأدمن', 'settings') + '<main class="wrap">';
@@ -1896,7 +1986,8 @@
     if (isPending(me())) { stopGeo(); WAITING = true; app.innerHTML = vWait(); return; }
     if (!(V.v === 'area' && (V.tab || 'wells') === 'wells' && S.ui.mode === 'map')) stopGeo();
     const v = V.v;
-    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? (seesFollow() ? vFollow() : vHome()) : v === 'staff' ? vStaff() : v === 'downs' ? vDowns() : v === 'rig' ? (canPlan() ? vRig() : vFollow()) : v === 'rigi' ? (canPlan() ? vRigI() : vFollow()) : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && canWells() ? vAdmin() : v === 'rep' && canWells() ? vRep() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
+    app.innerHTML = v === 'area' ? vArea() : v === 'follow' ? (seesFollow() ? vFollow() : vHome()) : v === 'staff' ? vStaff() : v === 'downs' ? vDowns() : v === 'rig' ? (canPlan() ? vRig() : vFollow()) : v === 'rigi' ? (canPlan() ? vRigI() : vFollow()) : v === 'export' ? vExport() : v === 'settings' ? vSettings() : v === 'admin' && canWells() ? vAdmin() : v === 'rep' && canWells() ? vRep() : v === 'pmail' && canPlan() ? vPmail() : v === 'audit' && isAdmin() ? vAudit() : v === 'users' && isAdmin() ? vUsers() : vHome();
+    if (v === 'pmail') pmFit();
   }
   let WAITING = false; // the waiting screen of a new account was shown
   function go(v, extra) { V = Object.assign({ v }, extra || {}); render(); window.scrollTo(0, 0); }
@@ -2036,6 +2127,17 @@
       case 'ssave': return saveSample();
       case 'xlsx': return doExport();
       case 'avocet': return canPlan() ? doAvocet() : null;
+      case 'pmail': return canPlan() ? go('pmail', { pmd: ($('#pmd') && $('#pmd').value) || pmDay() }) : null;
+      case 'pmback': return go('export', { pmd: V.pmd });
+      case 'pmsend': return canPlan() ? pmSend() : null;
+      case 'pmcopy': return canPlan() ? pmCopy() : null;
+      case 'irot': IR = null; return irotBox();
+      case 'irpick': { if (!IR) return; IR.op = $('#irop') && $('#irop').checked ? 'a' : 'b'; IR.on = $('#iron') && $('#iron').checked ? 1 : 0; IR.open = IR.op; return irotPick(b.dataset.k); }
+      case 'irpickok': { if (!IR || !WP) return; const k = b.dataset.k === 'b' ? 'b' : 'a', o = k === 'a' ? 'b' : 'a'; IR[k] = WP.sel.filter(id => id && id !== '__first'); IR[o] = IR[o].filter(id => !IR[k].includes(id)); return irotBox(); }
+      case 'irback': return irotBox();
+      case 'irok': return canPlan() && IR ? irotOk() : null;
+      case 'wfx': return wfxBox();
+      case 'wfxok': return canPlan() ? wfxOk() : null;
       case 'repread': return canPlan() ? doRepRead() : null;
       case 'backup': return backup();
       case 'aarea': V.a = b.dataset.a; V.q = ''; return render();
@@ -2094,6 +2196,7 @@
     if (t.dataset.int) { if (!canWells()) return; return setEdit(t.dataset.int, 'int', t.checked ? 1 : 0); }
     if (t.dataset.type) { if (!canWells()) return; setEdit(t.dataset.type, 't', t.value); return toast('اتغير النوع'); }
     if (t.id === 'rpf') return repRead(t.files);
+    if (t.id === 'pmd') { V.pmd = t.value || V.pmd; const p = $('#pms'); if (p) p.innerHTML = pmStatus(pmDay()); return; }
     if (t.id === 'rpday') { if (RP) { RP.day = t.value || RP.day; RP.hs = {}; repPlanNow(); render(); } return; }
     if (t.dataset.rphn) { if (!RP || !RP.plan || !canWells()) return; const v = L.normNum(t.value).trim(), x = L.toNum(v); RP.hs = RP.hs || {};
       if (v === '') { RP.hs[t.dataset.rphn] = 'own'; t.classList.remove('bad'); return; }
@@ -2141,9 +2244,10 @@
     if (!me()) { if (V.auth) { V = { v: 'home', lu: V.lu }; return render(); } return Cap.App.exitApp(); }
     if (V.v === 'downs' && V.da) return go('area', { a: V.da, tab: 'dt' });
     if (V.v === 'rigi') return go('rig');
+    if (V.v === 'pmail') return go('export', { pmd: V.pmd });
     if (V.v !== 'home' && !isPending(me())) return go(['admin', 'audit', 'users', 'rep'].includes(V.v) ? 'settings' : ['staff', 'downs', 'rig'].includes(V.v) ? 'follow' : 'home'); Cap.App.exitApp(); });
   // a new production day starts while the app is open
-  setInterval(() => { if (!FM && modalEl.hidden && me() && !VDAY && document.activeElement === document.body) render(); }, 60000);
+  setInterval(() => { if (!FM && modalEl.hidden && me() && !VDAY && V.v !== 'pmail' && document.activeElement === document.body) render(); }, 60000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) { flushForm(); bgStash(); saveNow(); } });
 
   // ---------------- sending in the background (Android) ----------------

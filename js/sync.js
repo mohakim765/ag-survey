@@ -24,6 +24,8 @@
     if (PLAN[p]) { const pl = s.plan && s.plan[a + '|' + b]; if (!pl) return null; const i = findFromEnd(pl[PLAN[p]], c); return i < 0 ? null : clone(pl[PLAN[p]][i]); }
     if (p === 'cw') return s.cfg.edits[a] ? clone(s.cfg.edits[a]) : null;
     if (p === 'nw') return s.cfg.newWells && s.cfg.newWells[a] ? clone(s.cfg.newWells[a]) : null;
+    if (p === 'ir') return s.cfg.irot ? clone(s.cfg.irot) : null;   // the intermittent rotation (the daily email)
+    if (p === 'wx') return s.cfg.wfx ? clone(s.cfg.wfx) : null;     // the engineer's water-flood network: design capacities, wells supported
     if (p === 'cs') return { prodDayStart: s.cfg.prodDayStart, dieselMin: s.cfg.dieselMin, gasDiffPct: s.cfg.gasDiffPct, chemMin: clone(s.cfg.chemMin || {}), req: clone(s.cfg.req || {}) };
     if (p === 'u') return s.users[a] ? clone(s.users[a]) : null;
     if (UMAP[p]) { const m = s[UMAP[p]]; return m && m[a] ? clone(m[a]) : null; }
@@ -55,6 +57,8 @@
     if (PLAN[p]) return upsert(planObj(a, b)[PLAN[p]], c);
     if (p === 'cw') { if (d && Object.keys(d).length) s.cfg.edits[a] = d; else delete s.cfg.edits[a]; return; }
     if (p === 'nw') { s.cfg.newWells = s.cfg.newWells || {}; if (d) s.cfg.newWells[a] = d; else delete s.cfg.newWells[a]; return; }
+    if (p === 'ir') { if (d) s.cfg.irot = d; return; }
+    if (p === 'wx') { if (d) s.cfg.wfx = d; return; }
     if (p === 'cs') { if (d) { for (const f of ['prodDayStart', 'dieselMin', 'gasDiffPct']) if (typeof d[f] === 'number') s.cfg[f] = d[f]; if (d.chemMin && typeof d.chemMin === 'object') s.cfg.chemMin = d.chemMin; if (d.req && typeof d.req === 'object' && !Array.isArray(d.req)) s.cfg.req = d.req; } return; }
     if (p === 'u') { if (d && !(s.gone && s.gone[root.L.uhash(a)])) s.users[a] = d; return; }   // a removed person never comes back
     if (UMAP[p]) { const m = s[UMAP[p]] || (s[UMAP[p]] = {}); if (d && !(s.gone && s.gone[root.L.uhash(a)])) m[a] = d; else delete m[a]; return; }
@@ -85,6 +89,8 @@
     for (const day in s.jobs || {}) for (const j of s.jobs[day]) put(`pj|${day}|${j.id}`, j.t);
     for (const id in s.cfg.edits) put('cw|' + id, s.cfg.edits[id].at);
     for (const id in (s.cfg.newWells || {})) put('nw|' + id, s.cfg.newWells[id].at);
+    if (s.cfg.irot) put('ir', s.cfg.irot.at);
+    if (s.cfg.wfx) put('wx', s.cfg.wfx.at);
     // settings: only when this phone changed them, so a new phone doesn't push the defaults over the admin's values
     const y = st(), D = root.SEED || {}; if (y.mt.cs || ['prodDayStart', 'dieselMin', 'gasDiffPct'].some(f => D[f] != null && s.cfg[f] !== D[f]) || Object.keys(s.cfg.chemMin || {}).length || Object.keys(s.cfg.req || {}).length) put('cs');
     for (const u in s.users) if (!s.users[u]._seed) put('u|' + u, s.users[u].at);   // the admin account from the seed is on every phone already

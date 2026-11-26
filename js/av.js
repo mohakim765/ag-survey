@@ -376,6 +376,37 @@
     sheets.push({ name: 'مراجعة', rows: revRows, widths: [16, 24, 8, 12, 22, 12, 10, 50] });
     return { sheets, stats: st, review: rev };
   }
-  const api = { build, report, key };
+  /* the water-flood network of the daily email (the engineer's WF dashboard): each source well (net.src: [id, design]) with
+     the injectors it feeds (net.inj: [id, source id, the wells it supports]). A value not read that day is the newest one
+     before it ({v, o: 1, d}); none at all: {miss: 1}. Hours and causes from the stops (a stop still open counts to the day's
+     end); a well shut all day has its running values 0; an injector's water is its rate for the hours it injected, a
+     source's the water of its injectors. */
+  function wfDash(o) {
+    const { day } = o, net = o.net || { src: [], inj: [] }, { byId, reading, hours, causeOf } = kit(o);
+    const val = (w, F, shut) => { if (shut && RUNNING.has(F)) return { v: 0 }; const y = reading(w, F); return y ? { v: y.v, o: y.d < day ? 1 : 0, d: y.d } : { miss: 1 }; };
+    function hc(w) {
+      const hv = hours({ n: w.n }, w); if (!hv) return { h: { miss: 1 }, c: '' };
+      const h = Math.max(0, Math.min(24, hv.h)); let c = '—';
+      if (h < 24) { const k = causeOf({ n: w.n }, w, hv); c = k && k.c ? k.c : 'Not recorded'; }
+      return { h: { v: h }, c, shut: h === 0 };
+    }
+    const out = [];
+    for (const [sid, design] of net.src) {
+      const w = byId.get(sid); if (!w) continue;
+      const s = hc(w), inj = [];
+      for (const [iid, src, sup] of net.inj) {
+        if (src !== sid) continue; const x = byId.get(iid); if (!x) continue;
+        const t = hc(x), rate = val(x, 'INJ', t.shut), h = t.h.v;
+        const act = rate.miss || h == null ? { miss: 1 } : { v: r2(rate.v * h / 24), o: rate.o, d: rate.d };
+        const tg = typeof x.tg === 'number' ? x.tg : 0;
+        inj.push({ w: x, whip: val(x, 'WH', false), csg: val(x, 'CSGP', false), act, tg, pct: act.miss ? null : tg ? act.v / tg : 'N/A', h: t.h, c: t.c, sup: sup || '' });
+      }
+      const tot = inj.some(i => i.act.miss) ? null : r2(inj.reduce((a, i) => a + i.act.v, 0));
+      out.push({ w, whp: val(w, 'WH', false), flp: val(w, 'FLP', false), amp: val(w, 'AMP', s.shut), hz: val(w, 'HZ', s.shut), tot, design: design || 0,
+        pct: tot == null ? null : design ? tot / design : 'N/A', part: inj.some(i => i.act.miss), h: s.h, c: s.c, inj });
+    }
+    return out;
+  }
+  const api = { build, report, key, wfDash };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.AV = api;
 })(typeof self !== 'undefined' ? self : this);
