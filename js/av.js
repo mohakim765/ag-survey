@@ -35,19 +35,26 @@
     const reps = S.reps || {}, repDays = Object.keys(reps).filter(d => d <= day).sort().reverse();
     const [s0, e0] = L.dayWindow(day, H), over = e0 <= now;
 
-    // a reading of one well: the day's, else the newest before it (the gas with that day's orifice factor)
+    /* a reading of one well: the day's, else the newest before it (the gas with that day's orifice factor). o.ref: the readings
+       of an engineers' email taken into the app as a reference for its day ({ d, r: { id: { field: value } } }): used when the
+       app has no newer reading of the well (an app reading of the same day comes first) */
+    const ref = o.ref && o.ref.d && o.ref.d <= day && o.ref.r ? o.ref : null;
     function reading(w, f) {
       const fld = f === 'WH' ? (w.t === 'GL' || w.t === 'WIW' ? 'WHIP' : 'WHP') : f;
+      let y = null;
       for (const d of days) {
         const r = S.days[d].r && S.days[d].r[w.id]; if (!r || !r.v) continue;
         let v;
         if (f === 'GAS') v = L.gasValue(Object.assign({}, w, { k: r.wk != null ? r.wk : w.k }), r.v);
         else if (f === 'CSG') v = /^[FPC]$/.test(r.v.CSG || '') ? r.v.CSG : null;
         else { v = num(r.v[fld]); if (f === 'WH' && v == null) v = num(r.v[fld === 'WHP' ? 'WHIP' : 'WHP']); }
-        if (v != null) return { v, d, r };
+        if (v != null) { y = { v, d, r }; break; }
       }
-      return null;
+      const x = ref && ref.r[w.id];
+      if (x && f !== 'GAS' && f !== 'CSG' && (!y || ref.d > y.d)) { const v = num(x[fld]); if (v != null) return { v, d: ref.d, ref: 1 }; }
+      return y;
     }
+    const srcOf = x => x && x.ref ? 'ميل الإنتاج ' + x.d : 'آخر قراية في البرنامج';
     // a manifold line's pressure: the day's, else the newest before it
     function mfdReading(p, l) {
       const one = ln => { for (const d of days) { const x = S.days[d].p && S.days[d].p[p]; const v = x && x.h ? num(x.h[ln || '-']) : null; if (v != null) return { v, d }; } return null; };
@@ -98,12 +105,12 @@
       return null;
     }
 
-    return { byId, over, reading, mfdReading, appHours, hours, cause, causeOf };
+    return { byId, over, reading, srcOf, mfdReading, appHours, hours, cause, causeOf };
   }
 
   function build(o) {
     const { S, A, L, wells, day } = o, prev = o.prev || null, snap = {}, chg = [];
-    const { byId, over, reading, mfdReading, hours, cause, causeOf } = kit(o), lists = A.lists || {};
+    const { byId, over, reading, srcOf, mfdReading, hours, cause, causeOf } = kit(o), lists = A.lists || {};
     const rev = [], st = { y: 0, r: 0, rows: 0, hrs: {}, untied: 0, down: 0 };
     const tabOrder = A.tabs.map(t => t.id).concat('MFD');
     const add = (tab, n, col, v, src, d, why, fill) => { rev.push({ tab, n, col, v, src, d, why, fill }); if (fill === 'y') st.y++; if (fill === 'r') st.r++; };
@@ -126,7 +133,7 @@
           if (shut && RUNNING.has(F)) return { v: 0 };
           const fx = F === 'INJ' && hrs != null && hrs < 24 ? v => r2(v * hrs / 24) : v => v, why = v => F === 'INJ' && hrs != null && hrs < 24 ? `المعدل ${v} × ${hrs} ساعة ÷ 24` : '';
           const x = w ? reading(w, F) : null;
-          if (x) { const v = fx(x.v); if (x.d < day) { add(t.id, row.n, c, v, 'آخر قراية في البرنامج', x.d, why(x.v), 'y'); return { v, fill: 'y', d: x.d, r: x.r }; } return { v, d: x.d, r: x.r }; }
+          if (x) { const v = fx(x.v); if (x.d < day) { add(t.id, row.n, c, v, srcOf(x), x.d, why(x.v), 'y'); return { v, fill: 'y', d: x.d, r: x.r }; } return { v, d: x.d, r: x.r }; }
           const b = row.b && row.b[c];
           if (b) {
             if (typeof b[0] === 'number') { const v = fx(b[0]); add(t.id, row.n, c, v, 'الشيت القديم', b[1], why(b[0]), 'y'); return { v, fill: 'y', d: b[1] }; }
@@ -259,7 +266,7 @@
   const STOPST = /^(s\.?\s*i|w\.?\s*o|t\s*&\s*a|p\s*&\s*a|shut)/i;
   function report(o) {
     const { S, A, L, wells, day } = o, ord = o.ord || {};
-    const { byId, reading, mfdReading, hours, causeOf } = kit(o);
+    const { byId, reading, srcOf, mfdReading, hours, causeOf } = kit(o);
     const rev = [], st = { y: 0, r: 0, rows: 0 };
     const add = (tab, n, col, v, src, d, why, fill) => { rev.push({ tab, n, col, v, src, d, why, fill }); if (fill === 'y') st.y++; if (fill === 'r') st.r++; };
     // a well's Avocet row: its old workbook values, its hours when the app has none
@@ -271,7 +278,7 @@
       if (shut && RUNNING.has(F)) return 0;
       fx = fx || (v => v);
       const y = w ? reading(w, F) : null;
-      if (y) { const v = fx(y.v); if (y.d < day) { add(tab, n, col, v, 'آخر قراية في البرنامج', y.d, '', 'y'); return { v, fill: 'y' }; } return v; }
+      if (y) { const v = fx(y.v); if (y.d < day) { add(tab, n, col, v, srcOf(y), y.d, '', 'y'); return { v, fill: 'y' }; } return v; }
       const c = x && Object.keys(x.t.roles).find(k => x.t.roles[k] === 'r:' + F), b = c && x.r.b && x.r.b[c];
       if (b && (typeof b[0] === 'number' || F === 'CHK')) { const v = typeof b[0] === 'number' ? fx(b[0]) : b[0]; add(tab, n, col, v, 'الشيت القديم', b[1], '', 'y'); return { v, fill: 'y' }; }
       if (w && !shut && (RNEED[w.t] || []).includes(F)) { add(tab, n, col, '', '', '', 'مفيش قراية خالص', 'r'); return { v: '', fill: 'r' }; }

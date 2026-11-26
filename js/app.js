@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.30';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.32';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1459,7 +1459,7 @@
     if (!/^\d{4}-\d\d-\d\d$/.test(d) || d > curDay()) return toast('راجع اليوم');
     let res;
     const prev = (S.avs || {})[d] || null;
-    try { res = AV.build({ S, A: SEED.avocet, L, wells: WELLS, day: d, H: H(), now: Date.now(), prev }); }
+    try { res = AV.build({ S, A: SEED.avocet, L, wells: WELLS, day: d, H: H(), now: Date.now(), prev, ref: SEED.ref }); }
     catch (e) { return toast('حصلت مشكلة في شيت Avocet: ' + (e.message || e)); }
     const r = await shareFile(`Avocet_${d}.xlsx`, XLSX.buildXlsx(res.sheets), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     if (r !== 'ok') return;
@@ -1477,7 +1477,7 @@
     const rd = Object.keys(S.reps || {}).filter(k => S.reps[k].ord && (S.reps[k].ord.wd || []).length).sort().pop(), ord = rd ? S.reps[rd].ord : SEED.repord;
     if (!ord) return toast('اعمد تقرير إنتاج الأول عشان البرنامج يعرف ترتيب صفوفه');
     let res;
-    try { res = AV.report({ S, A: SEED.avocet, L, wells: WELLS, day: d, H: H(), now: Date.now(), ord }); }
+    try { res = AV.report({ S, A: SEED.avocet, L, wells: WELLS, day: d, H: H(), now: Date.now(), ord, ref: SEED.ref }); }
     catch (e) { return toast('حصلت مشكلة في قرايات التقرير: ' + (e.message || e)); }
     const r = await shareFile(`AG_OIL_REPORT_readings_${L.addDays(d, 1)}.xlsx`, XLSX.buildXlsx(res.sheets), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     if (r === 'ok' && res.stats.r) toast(`فيه ${res.stats.r} خانة حمرا: راجعها في تابة «مراجعة»`);
@@ -1656,7 +1656,7 @@
   // the water-flood network: the engineer's WF sheet (the seed), with the design capacities and wells supported he changed
   const wfNet = () => { const n = SEED.wf || { src: [], inj: [] }, x = S.cfg.wfx || {}, dd = x.d || {}, ss = x.s || {};
     return { src: n.src.map(([id, v]) => [id, dd[id] != null ? dd[id] : v]), inj: n.inj.map(([id, s, sup]) => [id, s, ss[id] != null ? ss[id] : sup]) }; };
-  const pmBuild = d => PMAIL.build({ S, L, AV, A: SEED.avocet, wells: WELLS, day: d, H: H(), now: Date.now(), net: wfNet(), rot: rotNow(), testOf: w => (S.tests && S.tests[w.id]) || null, pmail: SEED.pmail });
+  const pmBuild = d => PMAIL.build({ S, L, AV, A: SEED.avocet, ref: SEED.ref, wells: WELLS, day: d, H: H(), now: Date.now(), net: wfNet(), rot: rotNow(), testOf: w => (S.tests && S.tests[w.id]) || null, pmail: SEED.pmail });
   function pmStatus(d) {
     const r = PMAIL.rotOn(rotNow(), d, L), nm = ids => PMAIL.names(ids.map(id => WBY[id]).filter(Boolean));
     return r ? `الآبار المتقطعة يوم ${esc(arDay(d))}: <b>بتتفتح</b> <bdi dir="ltr">${esc(nm(r.open))}</bdi>، و<b>بتتقفل</b> <bdi dir="ltr">${esc(nm(r.shut))}</bdi>.` : 'حركة الآبار المتقطعة واقفة: مش هتطلع في الميل.';
@@ -1705,9 +1705,10 @@
   function irotBox() {
     if (!canPlan()) return;
     const r = rotNow() || { a: [], b: [], ref: pmDay(), open: 'a', on: 1 }, d = pmDay(), on = PMAIL.rotOn(Object.assign({}, r, { on: 1 }), d, L);
-    IR = IR && IR.d === d ? IR : { a: r.a.slice(), b: r.b.slice(), open: on && on.open === r.b && r.b.length ? 'b' : 'a', on: r.on ? 1 : 0, d };
-    const grp = k => `<div class="irg"><div class="irh"><b>المجموعة ${k === 'a' ? 1 : 2}</b><button type="button" class="linkbtn" data-act="irpick" data-k="${k}">عدّل الآبار</button></div><p dir="ltr" class="irw">${esc(PMAIL.names(IR[k].map(id => WBY[id]).filter(Boolean)) || '—')}</p></div>`;
-    modal(`<h3>الآبار المتقطعة</h3><p class="mute" style="margin:0 0 8px">المجموعتين بيتبدّلوا كل يوم: واحدة بتتفتح (12 ساعة) والتانية مقفولة. البرنامج بيقلبهم لوحده كل يوم.</p>
+    IR = IR && IR.d === d ? IR : { a: r.a.slice(), b: r.b.slice(), open: on && on.open === r.b && r.b.length ? 'b' : 'a', on: r.on ? 1 : 0, oil: Object.assign({ a: '', b: '' }, r.oil || {}), d };
+    const grp = k => `<div class="irg"><div class="irh"><b>المجموعة ${k === 'a' ? 1 : 2}</b><button type="button" class="linkbtn" data-act="irpick" data-k="${k}">عدّل الآبار</button></div><p dir="ltr" class="irw">${esc(PMAIL.names(IR[k].map(id => WBY[id]).filter(Boolean)) || '—')}</p>
+      <label class="iro">إنتاجها النظري لما تتفتح <input class="in" inputmode="decimal" data-iroil="${k}" value="${esc(String(IR.oil[k] ?? ''))}"> برميل</label></div>`;
+    modal(`<h3>الآبار المتقطعة</h3><p class="mute" style="margin:0 0 8px">المجموعتين بيتبدّلوا كل يوم: واحدة بتتفتح (12 ساعة) والتانية مقفولة. البرنامج بيقلبهم لوحده كل يوم. الإنتاج النظري هو الـ Oil Diff في الميل: + يوم ما المجموعة تتفتح، و- يوم ما تتقفل.</p>
       ${grp('a')}${grp('b')}
       <label class="lab">يوم ${esc(arDay(d))} بتتفتح</label>${tg2('id="irop"', IR.open === 'a', 'المجموعة 1', 'المجموعة 2', 0)}
       <label class="lab" style="margin-top:10px">الحركة</label>${tg2('id="iron"', !!IR.on, 'شغالة', 'واقفة', 0)}
@@ -1721,7 +1722,9 @@
   function irotOk() {
     const op = $('#irop') && $('#irop').checked ? 'a' : 'b', on = $('#iron') && $('#iron').checked ? 1 : 0;
     if (on && (!IR.a.length || !IR.b.length)) return toast('كل مجموعة لازم يبقى فيها بير على الأقل');
-    S.cfg.irot = Object.assign({ a: IR.a, b: IR.b, ref: IR.d, open: op, on, at: Date.now() }, stampBy()); mark('ir');
+    const oil = {};
+    for (const el of document.querySelectorAll('[data-iroil]')) { const v = L.normNum(el.value).trim(), x = parseFloat(v); if (v === '') continue; if (!(x >= 0)) return toast('الإنتاج النظري رقم'); oil[el.dataset.iroil] = x; }
+    S.cfg.irot = Object.assign({ a: IR.a, b: IR.b, ref: IR.d, open: op, on, oil, at: Date.now() }, stampBy()); mark('ir');
     audit('', 'الآبار المتقطعة', 'حركة الآبار المتقطعة', '', on ? `يوم ${IR.d} بتتفتح المجموعة ${op === 'a' ? 1 : 2}` : 'واقفة', curDay());
     IR = null; save(); closeModal(); render(); toast('اتحفظت');
   }
@@ -2139,7 +2142,7 @@
       case 'pmcopy': return canPlan() ? pmCopy() : null;
       case 'pmsubj': return canPlan() ? pmSubj() : null;
       case 'irot': IR = null; return irotBox();
-      case 'irpick': { if (!IR) return; IR.op = $('#irop') && $('#irop').checked ? 'a' : 'b'; IR.on = $('#iron') && $('#iron').checked ? 1 : 0; IR.open = IR.op; return irotPick(b.dataset.k); }
+      case 'irpick': { if (!IR) return; IR.op = $('#irop') && $('#irop').checked ? 'a' : 'b'; IR.on = $('#iron') && $('#iron').checked ? 1 : 0; IR.open = IR.op; for (const el of document.querySelectorAll('[data-iroil]')) IR.oil[el.dataset.iroil] = el.value; return irotPick(b.dataset.k); }
       case 'irpickok': { if (!IR || !WP) return; const k = b.dataset.k === 'b' ? 'b' : 'a', o = k === 'a' ? 'b' : 'a'; IR[k] = WP.sel.filter(id => id && id !== '__first'); IR[o] = IR[o].filter(id => !IR[k].includes(id)); return irotBox(); }
       case 'irback': return irotBox();
       case 'irok': return canPlan() && IR ? irotOk() : null;

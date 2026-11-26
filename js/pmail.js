@@ -32,12 +32,13 @@
   }
 
   /* the intermittent rotation: two groups of wells, one opened (about 12 hours of production) and the other shut in, turned
-     over every day. rot: { a: [ids], b: [ids], ref: day, open: 'a'|'b' (the group opened that day), on } */
+     over every day. rot: { a: [ids], b: [ids], ref: day, open: 'a'|'b' (the group opened that day), on, oil: { a, b } (each
+     group's oil while opened: the engineers' theoretical figure) } */
   function rotOn(rot, day, L) {
     if (!rot || !rot.on || !rot.ref || !(rot.a || []).length || !(rot.b || []).length) return null;
     const k = Math.round((Date.parse(day + 'T12:00:00Z') - Date.parse(rot.ref + 'T12:00:00Z')) / 864e5);
     const open = ((k % 2) + 2) % 2 === 0 ? rot.open : rot.open === 'a' ? 'b' : 'a';
-    return { open: rot[open], shut: rot[open === 'a' ? 'b' : 'a'] };
+    return { open: rot[open], shut: rot[open === 'a' ? 'b' : 'a'], ko: open, ks: open === 'a' ? 'b' : 'a' };
   }
 
   // ---------------- the deferred production: the day's downtime against yesterday's ----------------
@@ -51,8 +52,10 @@
     const rows = [];
     if (rt) {
       const ow = rt.open.map(id => byId.get(id)).filter(Boolean), sw = rt.shut.map(id => byId.get(id)).filter(Boolean);
+      // the oil against yesterday: the group's theoretical figure (opened: +, shut in: -); without one, its wells' tests for 12 hours
       const sum = ws => ws.some(w => bopd(w) == null) ? null : ws.reduce((a, w) => a + bopd(w), 0) * 12 / 24;
-      const so = sum(ow), ss = sum(sw);
+      const oil = (k, ws) => o.rot.oil && typeof o.rot.oil[k] === 'number' ? o.rot.oil[k] : sum(ws);
+      const so = oil(rt.ko, ow), ss = oil(rt.ks, sw);
       if (ow.length) rows.push({ n: names(ow), dt: 12, r: 'Scheduled Intermittent Production [Back to production].', diff: so == null ? null : so });
       if (sw.length) rows.push({ n: names(sw), dt: 24, r: 'Scheduled Intermittent Production. [Still Down].', diff: ss == null ? null : -ss });
     }
@@ -94,8 +97,15 @@
         out.push({ h: nameOf(w) + (kind ? ` (${kind})` : ''), b: [note || (kind ? kind + '.' : '**')] });
       }
     }
-    if (gpm.length) out.push({ h: 'Generator PM', b: [gpm.map(nameOf).join(', ')] });
+    out.gpm = gpm;
     return out;
+  }
+
+  // a standing comment's values: {p:POINT:LINE} the day's reading of a pressure point, {t:POINT} the time it was read
+  function fill(t, o) {
+    const D = (o.S.days || {})[o.day] || {}, P = D.p || {};
+    return String(t).replace(/\{p:([^:}]+):([^}]+)\}/g, (m, id, hd) => { const x = P[id], v = x && x.h ? x.h[hd] : null; return v != null && v !== '' ? String(v) : '**'; })
+      .replace(/\{t:([^}]+)\}/g, (m, id) => { const x = P[id]; if (!x || !x.t || !x.h || !Object.keys(x.h).length) return '09:00 AM'; const d = new Date(x.t), h = d.getHours(), mi = d.getMinutes(); return `${String(h % 12 || 12).padStart(2, '0')}:${String(mi).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; });
   }
 
   // ---------------- the HTML (inline styles: Outlook keeps those) ----------------
@@ -174,6 +184,9 @@
     let h = `<div style="${F}font-size:11pt;color:#000">`;
     for (const j of J) h += head(j.h) + bullets(j.b);
     if (!J.length) h += head('**') + bullets(['**']);
+    // the standing comments of every email: Generator PM (the day's generator maintenance), then the engineer's fixed ones
+    h += head('Generator PM') + bullets([J.gpm.length ? names(J.gpm) : '**']);
+    for (const f of (o.pmail && o.pmail.fixed) || []) h += head(f.h) + bullets((f.b || []).map(b => fill(b, o)));
     if (D.rot) h += head('Intermittent Flow Wells') + bullets([`Open the following wells ${D.rot.open}.`, `SI the following wells ${D.rot.shut}.`]);
     h += title('Deferred Production:') + deferredHtml(D);
     const wf = wfHtml(W, day);

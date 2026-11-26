@@ -536,3 +536,5 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .pmbtns{flex-wrap:wrap}
 .pmbtns .btn{flex:1 1 200px}
 .pmhow{margin:10px 0 6px;padding-inline-start:22px;line-height:1.7}
+.iro{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;color:var(--ink2,inherit)}
+.iro .in{width:80px}
