@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.21';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.22';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1284,9 +1284,15 @@
     if (h >= 24) { const d = Math.floor(h / 24), rh = h % 24; return (d === 1 ? 'يوم' : d === 2 ? 'يومين' : d + (d <= 10 ? ' أيام' : ' يوم')) + (rh ? ' و' + hrsWord(rh) : ''); }   // a day or more: days and hours
     return hrsWord(h) + (r ? ' و' + r + ' دقيقة' : ''); };
   const canEditEv = x => editable() && (isAdmin() || canPlan() || (x.by === S.me && (L.prodDay(x.s, H()) === curDay() || (x.t && L.prodDay(x.t, H()) === curDay()))));   // own stop, of today or written today
+  /* the reasons of a stop: the technician's short list (with "another reason" in his words); the engineer, the head and the
+     admin pick from Avocet's list, the one the report uses too, and set the reason of any stop */
+  const engReasons = () => canPlan() && SEED.avocet && SEED.avocet.lists && (SEED.avocet.lists.dt || []).length ? SEED.avocet.lists.dt : null;
+  const reasonList = w => engReasons() || L.reasonsFor(w.t, SEED);
+  const curReason = (x, rs) => { if (!x) return ''; if (rs.includes(x.r)) return x.r; const a = L.avocet(x.r); if (rs.includes(a)) return a; return engReasons() ? '' : L.OTHER; };
+  const techSaid = x => x && engReasons() && (x.o || (x.r && !engReasons().includes(L.avocet(x.r)) && x.r !== 'Other' ? x.r : '')) ? `<p class="mute">الفني كتب: ${esc(x.o || x.r)}</p>` : '';
   function evBox(id) {
-    const x = id ? S.dt.find(e => e.id === id) : null, w = FM.w, rs = L.reasonsFor(w.t, SEED), cur = x ? (rs.includes(x.r) ? x.r : L.OTHER) : '';
-    modal(`<h3>${esc(w.n)}: ${x ? 'تعديل الوقفة' : 'وقفة حصلت وخلصت'}</h3><label>السبب</label><select class="in" id="er">${x ? '' : '<option value="">اختار السبب…</option>'}${rs.map(r => `<option ${r === cur ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
+    const x = id ? S.dt.find(e => e.id === id) : null, w = FM.w, rs = reasonList(w), cur = curReason(x, rs);
+    modal(`<h3>${esc(w.n)}: ${x ? 'تعديل الوقفة' : 'وقفة حصلت وخلصت'}</h3><label>السبب</label><select class="in" id="er">${x && cur ? '' : '<option value="">اختار السبب…</option>'}${rs.map(r => `<option ${r === cur ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>${techSaid(x)}
       <div id="ero" ${cur === L.OTHER ? '' : 'hidden'}><label>اكتب السبب</label><input class="in" id="eot" value="${esc(x ? (rs.includes(x.r) ? x.o || '' : (x.o || x.r)) : '')}"></div>
       <label>وقف الساعة</label>${timeInput('efr', x ? x.s : null)}${dayPick('efr', x ? L.prodDay(x.s, H()) : null)}<label>رجع الساعة</label>${timeInput('eto', x && x.e ? x.e : null)}${dayPick('eto', x && x.e ? L.prodDay(x.e, H()) : null)}
       ${x && !x.e ? '<p class="mute">سيب "رجع الساعة" فاضية لو البير لسه واقف.</p>' : ''}
@@ -1306,15 +1312,15 @@
     if (e0 != null && e0 <= s0) return toast('وقت الرجوع لازم يبقى بعد وقت الوقفة');
     const clash = S.dt.some(e => e.w === w.id && e.id !== MEV && e.s < (e0 == null ? Infinity : e0) && (e.e == null || e.e > s0)); if (clash) return toast('الوقت ده متداخل مع وقفة تانية');
     const rr = r === L.OTHER ? 'Other' : r;
-    if (x) { audit(w.id, w.n, 'تعديل وقفة', `${x.r} ${hm(x.s)}-${x.e ? hm(x.e) : 'لسه'}`, `${rr} ${hm(s0)}-${e0 ? hm(e0) : 'لسه'}`, viewDay()); Object.assign(x, { r: rr, o: r === L.OTHER ? o : '', s: s0, e: e0 }); mark('e|' + x.id); }
+    if (x) { audit(w.id, w.n, 'تعديل وقفة', `${x.r} ${hm(x.s)}-${x.e ? hm(x.e) : 'لسه'}`, `${rr} ${hm(s0)}-${e0 ? hm(e0) : 'لسه'}`, viewDay()); Object.assign(x, { r: rr, o: r === L.OTHER ? o : engReasons() ? x.o || (x.r !== rr && x.r !== 'Other' && !engReasons().includes(L.avocet(x.r)) ? x.r : '') : '', s: s0, e: e0 }); mark('e|' + x.id); }
     else { pushEv(Object.assign({ id: uid(), w: w.id, s: s0, e: e0, r: rr, o: r === L.OTHER ? o : '', src: 'tech' }, stampBy())); audit(w.id, w.n, 'وقفة', '', `${rr} ${hm(s0)}-${hm(e0)}`, viewDay()); }
     save(); closeModal(); renderForm(); toast('اتسجل');
   }
   function evDel() { const x = S.dt.find(e => e.id === MEV), w = FM.w; if (!x) return; confirmBox('تمسح الوقفة دي؟', 'امسح', () => { S.dt = S.dt.filter(e => e.id !== x.id); mark('e|' + x.id); audit(w.id, w.n, 'مسح وقفة', `${x.r} ${hm(x.s)}-${x.e ? hm(x.e) : 'لسه'}`, '', viewDay()); save(); renderForm(); toast('اتمسحت'); }); }
   let DPRE = null; // {r, mid, o}: the stop comes from today's maintenance
   function downBox(w, pre) {
-    const rs = L.reasonsFor(w.t, SEED); DPRE = pre || null;
-    modal(`<h3>${esc(w.n)}: البير وقف${pre ? ' للصيانة' : ''}</h3><label>السبب</label><select class="in" id="dr"><option value="">اختار السبب…</option>${rs.map(r => `<option ${pre && pre.r === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
+    const rs = reasonList(w), pr = pre ? (rs.includes(pre.r) ? pre.r : L.avocet(pre.r)) : ''; DPRE = pre || null;
+    modal(`<h3>${esc(w.n)}: البير وقف${pre ? ' للصيانة' : ''}</h3><label>السبب</label><select class="in" id="dr"><option value="">اختار السبب…</option>${rs.map(r => `<option ${pr === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}</select>
       <div id="dro" hidden><label>اكتب السبب</label><input class="in" id="dot"></div><label>وقف الساعة كام؟</label>${timeInput('dts', Date.now())}${dayPick('dts')}
       <div class="btns" style="margin-top:14px"><button class="btn" data-act="mclose">إلغاء</button><button class="btn danger" data-act="downok">سجّل الوقفة</button></div>`);
     $('#dr').onchange = () => { $('#dro').hidden = $('#dr').value !== L.OTHER; }; tWatch('dts');
@@ -1324,7 +1330,7 @@
     if (!r) return toast('اختار سبب الوقفة');
     if (r === L.OTHER && !o) return toast('اكتب السبب');
     const tv = readTime('dts'); if (tv === null) return toast(BADTIME);
-    const mt = DPRE && DPRE.r === r ? DPRE : null;
+    const mt = DPRE && (DPRE.r === r || L.avocet(DPRE.r) === r) ? DPRE : null;
     const s = tv ? tsOn(tv, pickedDay('dts')) : Date.now(); if (s > Date.now() + 60000) return toast(FUTURE);
     if (S.dt.some(x => x.w === w.id && (x.e == null || x.e > s))) return toast('الوقت ده متداخل مع وقفة تانية. عدّل الوقفة اللي قبلها'); const e = Object.assign({ id: uid(), w: w.id, s, e: null, r: r === L.OTHER ? 'Other' : r, o: o || (mt ? mt.o : ''), src: mt ? 'maint' : 'tech' }, stampBy()); e.byn = stampBy().byn; if (mt) e.mid = mt.mid;
     pushEv(e); audit(w.id, w.n, 'داون تايم', '', `${e.r} من ${hm(s)}`, curDay()); save(); closeModal(); renderForm(); toast('اتسجلت الوقفة');
@@ -1373,28 +1379,49 @@
       <button class="btn wide" style="margin-top:8px" data-act="xlsx">${ic('dl')} طلّع ملف Excel</button></div>
       <p class="mute">الـ PDF فيه صفحة لكل منطقة بنفس شكل ورقة السيرفاي: جدول لكل نوع بير، والمانيفولد، والديزل والكيميكال، والداون تايم. الصور نفس الصفحات بس كل صفحة صورة، أسهل تتفتح على الموبايل. لما تدوس، اختار واتساب من القايمة اللي هتظهر.</p>
       <p class="mute">الـ Excel فيه تابة لكل نوع بير، وتابة للديزل بنفس شكل ورقة الديزل، والكيميكال، والداون تايم وساعات التشغيل، والعينات${isAdmin() ? '، وسجل التعديلات' : ''}.</p>`;
-    if (canPlan() && SEED.avocet) h += `<div class="card"><h3 style="margin:0 0 6px">شيت Avocet</h3>
+    if (canPlan() && SEED.avocet) h += `<div class="card"><h3 style="margin:0 0 6px">شيت Avocet وقرايات التقرير</h3>
       <label class="lab">يوم الإنتاج</label><input class="in" type="date" id="avd" value="${avDay()}" max="${d}">
       <p class="avs" id="avs">${avStatus(avDay())}</p>
       <button class="btn wide" data-act="avocet">${ic('dl')} طلّع شيت Avocet</button>
-      <p class="mute" style="margin-bottom:0">نفس تابات شيت السيرفاي القديم اللي بتدخل Avocet، بنفس الأعمدة وترتيب الآبار، ومعاها تابة المانيفولدات. البير اللي ملوش قراية في اليوم ده بياخد آخر قراية ليه، وبتبقى صفرا. الخانة الحمرا ناقصة لازم تتراجع. تابة «مراجعة» فيها كل خانة صفرا أو حمرا وجت منين.</p></div>`;
+      <button class="btn wide" data-act="repread" style="margin-top:8px">${ic('dl')} طلّع قرايات التقرير</button>
+      <p class="mute" style="margin-bottom:0">شيت Avocet: نفس تابات شيت السيرفاي القديم وأعمدته وترتيب آباره، ومعاه تابة المانيفولدات. قرايات التقرير: نفس صفوف وأعمدة تقرير الإنتاج، تلزقها في مكانها. البير اللي ملوش قراية في اليوم ده بياخد آخر قراية ليه وبتبقى صفرا، والخانة الحمرا ناقصة لازم تتراجع، وتابة «مراجعة» فيها كل خانة صفرا أو حمرا وجت منين. لو طلّعت شيت Avocet لنفس اليوم تاني، اللي اتغير من آخر مرة بيبقى أزرق.</p></div>`;
     return h + '</main>' + tabs('export');
   }
   // the Avocet sheet: for the production day that ended (the report of a day comes the next morning)
-  const avDay = () => V.avd || L.addDays(curDay(), -1);
+  const avDay = () => { if (V.avd) return V.avd; const h = new Date().getHours(); return h >= H() && h < 12 ? L.addDays(curDay(), -1) : curDay(); };
   function avStatus(d) {
-    const rec = (S.reps || {})[d];
-    let s = rec && rec.wh ? `<b class="ok">تقرير الإنتاج بتاع اليوم ده اتعمد</b>: ساعات التشغيل منه.` : `<b class="warn">تقرير الإنتاج بتاع اليوم ده لسه متعمدش</b>: ساعات التشغيل هتطلع من وقفات البرنامج. اعمد التقرير الأول عشان الساعات تبقى زي التقرير.`;
-    if (d >= curDay()) s += '<br>اليوم ده لسه مخلصش (بيخلص الساعة ' + H() + ' الصبح).';
+    const [a, b] = L.dayWindow(d, H()), down = new Set(S.dt.filter(e => WBY[e.w] && !WBY[e.w].hid && e.s < b && (e.e == null || e.e > a)).map(e => e.w)).size;
+    let s = `ساعات التشغيل وأسباب الوقفات من وقفات البرنامج: <b>${down}</b> بير ${down === 1 ? 'وقف' : 'وقفوا'} في اليوم ده.`;
+    if (d >= curDay()) s += '<br><b class="warn">اليوم ده لسه مخلصش</b>: البير الواقف دلوقتي محسوب واقف لحد ' + H() + ' الصبح، والشغال شغال. لو حصل تغيير بالليل طلّع الشيت تاني الصبح.';
+    const p = (S.avs || {})[d]; if (p && p.t) s += `<br>آخر مرة طلّعت شيت Avocet لليوم ده: <b>${new Date(p.t).toDateString() === new Date().toDateString() ? hm(p.t) : L.stamp(p.t)}</b>${p.byn && p.by !== S.me ? ' (' + esc(p.byn) + ')' : ''}. اللي اتغير من ساعتها هيبقى أزرق.`;
     return s;
   }
   async function doAvocet() {
     const d = ($('#avd') && $('#avd').value) || avDay();
     if (!/^\d{4}-\d\d-\d\d$/.test(d) || d > curDay()) return toast('راجع اليوم');
     let res;
-    try { res = AV.build({ S, A: SEED.avocet, L, wells: WELLS, day: d, H: H(), now: Date.now() }); }
+    const prev = (S.avs || {})[d] || null;
+    try { res = AV.build({ S, A: SEED.avocet, L, wells: WELLS, day: d, H: H(), now: Date.now(), prev }); }
     catch (e) { return toast('حصلت مشكلة في شيت Avocet: ' + (e.message || e)); }
     const r = await shareFile(`Avocet_${d}.xlsx`, XLSX.buildXlsx(res.sheets), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    if (r !== 'ok') return;
+    // what this sheet had: the next sheet of the same day shows what changed since
+    S.avs = S.avs || {}; S.avs[d] = Object.assign({ r: res.snap.r }, stampBy()); mark('as|' + d);
+    for (const k of Object.keys(S.avs)) if (k < L.addDays(curDay(), -30)) { delete S.avs[k]; mark('as|' + k); }
+    save(); const s = $('#avs'); if (s) s.innerHTML = avStatus(avDay());
+    const msg = [prev ? (res.changes.length ? `اتغير ${res.changes.length} من آخر مرة (أزرق)` : 'مفيش حاجة اتغيرت من آخر مرة') : '', res.stats.r ? `${res.stats.r} خانة حمرا` : ''].filter(Boolean).join('، ');
+    if (msg) toast(msg);
+  }
+  // the readings for the production report: the report of the next morning; on the rows of the newest approved report
+  async function doRepRead() {
+    const d = ($('#avd') && $('#avd').value) || avDay();
+    if (!/^\d{4}-\d\d-\d\d$/.test(d) || d > curDay()) return toast('راجع اليوم');
+    const rd = Object.keys(S.reps || {}).filter(k => S.reps[k].ord && (S.reps[k].ord.wd || []).length).sort().pop(), ord = rd ? S.reps[rd].ord : SEED.repord;
+    if (!ord) return toast('اعمد تقرير إنتاج الأول عشان البرنامج يعرف ترتيب صفوفه');
+    let res;
+    try { res = AV.report({ S, A: SEED.avocet, L, wells: WELLS, day: d, H: H(), now: Date.now(), ord }); }
+    catch (e) { return toast('حصلت مشكلة في قرايات التقرير: ' + (e.message || e)); }
+    const r = await shareFile(`AG_OIL_REPORT_readings_${L.addDays(d, 1)}.xlsx`, XLSX.buildXlsx(res.sheets), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     if (r === 'ok' && res.stats.r) toast(`فيه ${res.stats.r} خانة حمرا: راجعها في تابة «مراجعة»`);
   }
   function exportOpts() {
@@ -1572,6 +1599,7 @@
     // (the gas tab before the production report before the engineering tests tab)
     const old = (S.reps || {})[P.day], rank = x => ({ g: 3, p: 2, e: 1 })[x && x[2]] || 0, merge = (a, b) => { const o = Object.assign({}, a || {}); for (const k in b || {}) if (rank(b[k]) >= rank(o[k])) o[k] = b[k]; return o; };
     rec.wh = merge(old && old.wh, P.wh); rec.whn = merge(old && old.whn, P.whn);
+    if (P.ord && (P.ord.wd || []).length) rec.ord = Object.assign({ file: (RP.files.find(f => f.kind === 'oil') || {}).name || '' }, P.ord); else if (old && old.ord) rec.ord = old.ord;
     rec.t = Date.now(); S.reps = S.reps || {}; S.reps[P.day] = rec; mark('rp|' + P.day); S.ui.rpSeen = rec.t;
     save(); RP = null; V.rpd = P.day; render(); window.scrollTo(0, 0); SYNC.run(false);
     toast(rec.close.length || rec.running.length || rec.tg.length ? [rec.close.length ? `اتقفل ${rec.close.length} بير` : '', rec.running.length ? `رجع ${rec.running.length} بير شغال` : '', rec.tg.length ? `اتحدّث ${rec.tg.length} تارجت وفاكتور` : ''].filter(Boolean).join(' و') : 'اتحفظت المقارنة');
@@ -1908,6 +1936,7 @@
       case 'ssave': return saveSample();
       case 'xlsx': return doExport();
       case 'avocet': return canPlan() ? doAvocet() : null;
+      case 'repread': return canPlan() ? doRepRead() : null;
       case 'backup': return backup();
       case 'aarea': V.a = b.dataset.a; V.q = ''; return render();
       case 'cfgsave': {

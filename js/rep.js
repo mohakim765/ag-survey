@@ -324,6 +324,16 @@
        engineering report's gas tab (gas wells), e its tests tab. The injection the report says (act) is kept to check against. */
     const whOf = r => [num(r.hrs), r.cause || '', r.fk === 'eng' ? (r.gt ? 'g' : 'e') : 'p', num(r.act)];
     P.wh = {}; for (const { w, r } of st.values()) P.wh[w.id] = whOf(r);
+    /* the production report's own rows: its WELL DATA wells and its WATER FLOOD WELLS injectors and source wells, each with its
+       row number, name and app well, so the app's readings for the report come out on the same rows */
+    P.ord = { wd: [], wi: [], ws: [] }; const seenRow = new Set();
+    for (const f of oil) for (const r of f.rows) {
+      const sn = String(r.sheet).trim(), sec = /^well data$/i.test(sn) ? 'wd' : /water\s*flood/i.test(sn) ? (r.cols.includes('req') ? 'wi' : 'ws') : null;
+      if (!sec || seenRow.has(r.sheet + '|' + r.row)) continue; seenRow.add(r.sheet + '|' + r.row);
+      const w = mt(r.n), ok = w && (sec === 'wi' ? w.t === 'WIW' : sec === 'ws' ? w.t === 'WSW' : !WATER(w.t));   // (an old water well's name can be an oil well's now)
+      P.ord[sec].push([r.row, String(r.n).trim(), ok ? w.id : '', String(r.st || '').trim()]);   // (its status there: the running word the report uses)
+    }
+    for (const k in P.ord) P.ord[k].sort((a, b) => a[0] - b[0]);
     P.whn = {}; for (const r of miss) if (hasSt(r)) P.whn[key(r.n)] = whOf(r);
     return P;
   }
