@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.35';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.36';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -113,7 +113,7 @@
   const editable = () => viewDay() === curDay() || canWells();   // a day gone: the engineer and the admin (the morning's fixes)
 
   // ---------------- icons ----------------
-  const P = {
+  const P = { search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>', 
     back: '<path d="M9 5l7 7-7 7"/>', close: '<path d="M6 6l12 12M18 6L6 18"/>', check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     home: '<path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/>', list: '<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>', flask: '<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3"/><path d="M7.5 15h9"/>',
     dl: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>', gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
@@ -478,6 +478,13 @@
     else if (d !== curDay()) VDAY = null;
     if (me() && !seesFollow()) { const mine = SEED.areas.filter(a => planFor(d, a.id).staff.some(x => isMe(staffP(x)))).map(a => a.n).concat(jobsFor(d).filter(j => j.staff.some(x => isMe(staffP(x)))).map(j => j.k));
       if (mine.length) h += `<p class="mine">النهارده انت في: <b>${mine.map(esc).join(' و')}</b></p>`; }
+    h += `<div class="search hsearch">${ic('search')}<input id="hq" placeholder="دوّر على بير في كل المناطق" value="${esc(V.hq || '')}" autocomplete="off" dir="ltr" enterkeyhint="search"></div>`;
+    return h + `<div id="hlist">${homeBody(d)}</div></main>` + tabs('home');
+  }
+  // under the search box: the areas, or (while typing) the wells found in every area
+  function homeBody(d) {
+    if (V.hq && V.hq.trim()) return homeFind(d);
+    let h = '';
     h += `<p class="homesync" data-sync>${syncLine()}</p><div class="agrid">`;
     for (const a of SEED.areas) {
       const s = areaStats(a.id, d), pct = s.total ? Math.round(s.done / s.total * 100) : 0, pl = planFor(d, a.id), todo = pl.tasks.filter(t => !t.done).length + pl.maint.length + pl.work.length;
@@ -485,7 +492,15 @@
         <span class="ac"><b>${s.done}</b> من ${s.total}</span><span class="meter"><i style="width:${pct}%"></i></span>
         <span class="chips">${s.down ? `<span class="chip dn"><b>${s.down}</b> واقف</span>` : ''}${s.warn ? `<span class="chip w"><b>${s.warn}</b> تنبيه</span>` : ''}${s.dl ? `<span class="chip w">ديزل <b>${s.dl}</b></span>` : ''}${todo ? `<span class="chip"><b>${todo}</b> متابعة</span>` : ''}${unseen(d, [a.id]).length ? `<span class="chip new"><b>${unseen(d, [a.id]).length}</b> جديد</span>` : ''}</span></button>`;
     }
-    return h + '</div></main>' + tabs('home');
+    return h + '</div>';
+  }
+  function homeFind(d) {
+    const match = wellMatch(V.hq), ws = WELLS.filter(w => match(w)).sort((x, y) => L.natural(x.n, y.n));
+    const vis = ws.filter(w => !w.hid), hid = ws.filter(w => w.hid);
+    let h = vis.length ? `<section class="sec"><h3>${vis.length === 1 ? 'بير واحد' : vis.length + ' بير'}${vis.length > 40 ? ' <small>اكتب أكتر عشان تقلّل</small>' : ''}</h3>${vis.slice(0, 40).map(w => wellRow(w, d, { chip: 1, area: 1 })).join('')}</section>` : '';
+    if (hid.length) h += `<section class="sec"><h3>آبار مخفية <small>لو لقيت واحد شغال سجّله</small></h3>${hid.slice(0, 20).map(w => wellRow(w, d, { chip: 1, area: 1 })).join('')}</section>`;
+    if (!ws.length) h += `<p class="empty">مفيش بير بالاسم ده</p>`;
+    return h;
   }
   // ---------------- area ----------------
   function vArea() {
@@ -514,7 +529,7 @@
   function wellRow(w, d, opt) {
     opt = opt || {}; const s = wellState(w, d); const sum = s.r ? L.summary(w, s.r) : '';
     const pl = planFor(d, w.a), job = pl.maint.some(m => m.w.includes(w.id)) || pl.work.some(x => x.w === w.id);
-    const tags = [opt.chip ? tchip(w.t) : '', s.open ? `<span class="tag dn">واقف</span>` : '', w.int ? `<span class="tag int">متقطع</span>` : '', w.hid ? `<span class="tag hid">مخفي</span>` : '', job ? `<span class="tag job">شغل النهارده</span>` : '', opt.dist != null ? `<span class="tag">${opt.dist}</span>` : ''].join('');
+    const tags = [opt.area ? `<span class="tag ar">${esc((areaOf(w.a) || {}).n || '')}</span>` : '', opt.chip ? tchip(w.t) : '', s.open ? `<span class="tag dn">واقف</span>` : '', w.int ? `<span class="tag int">متقطع</span>` : '', w.hid ? `<span class="tag hid">مخفي</span>` : '', job ? `<span class="tag job">شغل النهارده</span>` : '', opt.dist != null ? `<span class="tag">${opt.dist}</span>` : ''].join('');
     const part = !s.open && !s.done && s.p.have > 0;
     let sub = s.open ? `${s.open.r && s.open.r !== 'SI' ? esc(s.open.r) + ' · ' : ''}من ${sinceTxt(s.open.s)}` : sum ? esc(sum) : 'مستني قراية';
     if (part) sub += ` · ناقص ${s.p.miss.map(fname).join('، ')}`;
@@ -2318,6 +2333,7 @@
     if (t.id === 'sq') { V.sq = t.value; V.spt = ''; const r = $('#sres'); if (r) r.innerHTML = sampleResults(V.v === 'area' ? V.a : null); return; }
     if (t.id === 'fn' && FM) { FM.n = t.value; return; }
     if (t.dataset.pt || t.dataset.tk) { const n = L.normNum(t.value); setV(n); if (t.dataset.tk) { const x = L.toNum(n); t.classList.toggle('bad', n !== '' && (x == null || x < 0 || x > 100)); t.classList.toggle('low', x != null && x <= 100 && x < S.cfg.dieselMin); } return; }
+    if (t.id === 'hq') { V.hq = t.value; const box = $('#hlist'); if (box && V.v === 'home') box.innerHTML = homeBody(viewDay()); return; }
     if (t.id === 'q') { V.q = t.value; if (V.q) V.tf = null; const box = $('#wlist'), a = V.v === 'area' && areaOf(V.a); if (box && a) box.innerHTML = areaWellsList(a, viewDay()); return; }
     if ((t.id === 'aq' || t.id === 'uq') && comp) { V.q = t.value; return; }   // redrawn when the keyboard is done with the word
     if (t.id === 'aq' || t.id === 'uq') { V.q = t.value; const pos = t.selectionStart, id = t.id; render(); const q = $('#' + id); if (q) { q.focus(); q.setSelectionRange(pos, pos); } return; }

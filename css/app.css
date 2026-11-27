@@ -543,3 +543,8 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .banner .btn.sm{margin-top:8px;display:inline-flex}
 .tag.bad{background:var(--bad2);border-color:var(--bad);color:var(--bad)}
 .cardok{border-color:var(--pen)}
+/* v0.6.36: a well in any area, from the first page */
+.hsearch{position:relative}
+.hsearch svg{position:absolute;right:14px;top:50%;width:22px;height:22px;transform:translateY(-50%);color:var(--pen);pointer-events:none}
+.hsearch input{font-size:17px;padding-right:46px}
+.tag.ar{background:var(--pen2);border-color:var(--pen);color:var(--ink);font-weight:700}
