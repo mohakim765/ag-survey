@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.33';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.34';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -969,7 +969,7 @@
     S.seedPub = SEED.version; save();
   }
   // the private link: opens the web version already tied to the sheet
-  const webLink = () => WEB_URL + '#link=' + btoa(unescape(encodeURIComponent(JSON.stringify({ u: SYNC.url(), k: (window.CONFIG && CONFIG.syncKey) || '' })))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const webLink = () => WEB_URL + '#link=' + btoa(unescape(encodeURIComponent(JSON.stringify(Object.assign({ u: SYNC.url(), k: (window.CONFIG && CONFIG.syncKey) || '' }, window.CONFIG && CONFIG.syncMove && SYNC.url() === CONFIG.syncUrl ? { m: CONFIG.syncMove } : {}))))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   // people the admin asked to remove before the delete button existed (by hash only)
   const GONE0 = ['58e77434de587e52'];
   // an alert when something new reaches the area this person works in

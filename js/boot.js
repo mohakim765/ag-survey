@@ -8,7 +8,7 @@
   function b64d(t) { t = t.replace(/-/g, '+').replace(/_/g, '/'); while (t.length % 4) t += '='; return decodeURIComponent(escape(atob(t))); }
   function readLink(text) {
     const m = String(text || '').match(/link=([A-Za-z0-9_-]+)/); if (!m) return null;
-    try { const L = JSON.parse(b64d(m[1])); return L && /^https:\/\/script\.google(usercontent)?\.com\//.test(L.u) && L.k ? { u: L.u, k: L.k } : null; } catch (e) { return null; }
+    try { const L = JSON.parse(b64d(m[1])); return L && /^https:\/\/script\.google(usercontent)?\.com\//.test(L.u) && L.k ? Object.assign({ u: L.u, k: L.k }, L.m && Array.isArray(L.m.from) ? { m: { from: L.m.from.map(String), rows: Number(L.m.rows) || 0, t: Number(L.m.t) || 0 } } : {}) : null; } catch (e) { return null; }
   }
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent), standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone;
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => { });
@@ -19,7 +19,7 @@
   else if (/link=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
   window.addEventListener('hashchange', () => { if (readLink(location.hash)) location.reload(); }); // a new link opened while the page is open
   const link = get('ags_link');
-  window.CONFIG = { syncUrl: link ? link.u : '', syncKey: link ? link.k : '', web: true };
+  window.CONFIG = { syncUrl: link ? link.u : '', syncKey: link ? link.k : '', syncMove: (link && link.m) || null, web: true };
   window.SEED = get('ags_seed');
   if (link && window.SEED && window.SEED.wells) return start();
   screen(link);

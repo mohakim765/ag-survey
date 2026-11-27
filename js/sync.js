@@ -140,8 +140,21 @@
     if (running) { if (manual) manualAsk = true; return current; }
     current = doRun(manual); return current;
   }
+  // the sheet link changed. A copy of the old sheet (CONFIG.syncMove: the old links, the rows its log had and the time of the copy):
+  // keep reading from where the copy starts, and send again what changed after the copy (it may have gone to the old sheet only).
+  // Any other new sheet: read it from the start and send everything on this phone.
+  function moved() {
+    const y = st(), m = root.CONFIG && root.CONFIG.syncMove, from = (m && m.from) || [];
+    if (y.url && from.includes(y.url)) y.url = '';   // the link saved on this phone was the old sheet
+    const u = url(); if (!u || y.at === u) return;
+    if (m && from.length && u === String(root.CONFIG.syncUrl || '').trim() && y.seeded && (!y.at || from.includes(y.at))) {
+      y.cursor = Math.min(y.cursor, Number(m.rows) || 0);
+      eachKey((k, rt) => { const v = y.mt[k] || Number(rt) || 0; if (v >= m.t && !y.dirty[k]) y.dirty[k] = v; });
+    } else if (y.at) { y.cursor = 0; y.seeded = false; }
+    y.at = u;
+  }
   async function doRun(manual) {
-    const y = st(); if (!y || !url()) return { ok: false, err: 'مش متربط بالشيت' };
+    const y = st(); if (y) moved(); if (!y || !url()) return { ok: false, err: 'مش متربط بالشيت' };
     // the app is in the background on Android: the phone's own background job sends the changes (when there is a network)
     if (!manual && typeof document !== 'undefined' && document.hidden && C.bgOn && C.bgOn()) return { ok: false, err: '' };
     running = true; lastRun = Date.now(); clearTimeout(timer);
@@ -192,12 +205,13 @@
     C = ctx; const s = S();
     s.sync = Object.assign({ url: '', dev: '', cursor: 0, last: 0, dirty: {}, mt: {}, seeded: false, err: '' }, s.sync || {});
     if (!s.sync.dev) s.sync.dev = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    moved();
     setInterval(() => { if (!document.hidden && Date.now() - lastRun > 80000) run(false); }, 30000);
     window.addEventListener('online', () => schedule(1000));
     document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(1500); });
     schedule(2000);
   }
-  function setUrl(u) { st().url = (u || '').trim(); st().seeded = false; st().cursor = 0; C.save(); schedule(500); }
+  function setUrl(u) { st().url = (u || '').trim(); st().seeded = false; st().cursor = 0; st().at = url(); C.save(); schedule(500); }
   function each(fn) { const ks = []; eachKey(k => ks.push(k)); for (const k of ks) fn(k); }
   // for the phone's background job: the request the app would send now (the oldest changes first)
   function outbox(max) {
