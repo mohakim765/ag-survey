@@ -47,6 +47,7 @@
         let v;
         if (f === 'GAS') v = L.gasValue(Object.assign({}, w, { k: r.wk != null ? r.wk : w.k }), r.v);
         else if (f === 'CSG') v = /^[FPC]$/.test(r.v.CSG || '') ? r.v.CSG : null;
+        else if (f === 'SPM') { v = num(r.v.PSPD); if (v == null) v = num(r.v.SPM); }   // the pump speed is the strokes a minute
         else { v = num(r.v[fld]); if (f === 'WH' && v == null) v = num(r.v[fld === 'WHP' ? 'WHIP' : 'WHP']); }
         if (v != null) { y = { v, d, r }; break; }
       }

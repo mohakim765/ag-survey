@@ -8,16 +8,18 @@
     AMP: { l: 'Current', u: 'A', s: 'Amp' }, HZ: { l: 'Frequency', u: 'Hz', s: 'Hz' }, PI: { l: 'PI', u: 'psi' }, PD: { l: 'PD', u: 'psi' }, DP: { l: 'DP', u: 'psi' },
     TI: { l: 'Ti', u: '°F' }, TM: { l: 'Tm', u: '°F' },
     RUN: { l: 'Run Time', u: '%', s: 'Run' }, INFO: { l: 'Sam rate', sub: 'info production', u: '', s: 'Sam' }, FILL: { l: 'Pump Fillage', u: '%', s: 'Fill' },
-    PSPD: { l: 'Pump Speed', u: '', s: 'Speed' }, PEAK: { l: 'Peak Load', u: '', s: 'Peak' }, MINL: { l: 'Minimum Load', u: '', s: 'Min' },
-    FLD: { l: 'Fluid Load', u: '', s: 'Fluid' }, SPM: { l: 'SPM', u: '' },
+    PSPD: { l: 'Pump speed (SPM)', u: '', s: 'Speed' }, PEAK: { l: 'Peak Load', u: '', s: 'Peak' }, MINL: { l: 'Minimum Load', u: '', s: 'Min' },
+    FLD: { l: 'Fluid Load', u: '', s: 'Fluid' }, SPM: { l: 'Pump speed (SPM)', u: '' },   // v0.6.37: SPM is the pump speed; old readings keep it, it shows as PSPD
     DS: { l: 'Downstream P. (DS)', u: 'psi', s: 'DS' }, US: { l: 'Upstream P. (US)', u: 'psi', s: 'US' }, DIFF: { l: 'Diff. P.', u: '', s: 'Diff' },
     TEMP: { l: 'Temperature', u: '°F', s: 'Temp' }, GINJ: { l: 'Gas Injection', u: 'MMSCFD', s: 'Gas' }, INJ: { l: 'Injection Rate', u: 'BWPD', s: 'Inj' },
   };
+  // an SRP reading written before v0.6.37 may have the pump speed in SPM only: it is the same value
+  const srpFix = v => { if (v && v.SPM != null && v.SPM !== '' && (v.PSPD == null || v.PSPD === '')) v.PSPD = v.SPM; return v; };
   const TYPES = {
     NF: { n: 'Natural Flow', f: ['WHP', 'FLP', 'CSGP', 'CHK', 'SSSV', 'SSV'], key: ['WHP', 'FLP'], req: ['WHP', 'FLP'] },
     PL: { n: 'Plunger Lift', f: ['WHP', 'FLP', 'CSGP'], key: ['WHP', 'FLP', 'CSGP'], req: ['WHP', 'CSGP'] },
     ESP: { n: 'ESP', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'AMP', 'HZ', 'PI', 'PD', 'TI', 'TM'], key: ['WHP', 'AMP', 'HZ', 'PI'], req: ['WHP', 'AMP', 'HZ'] },
-    SRP: { n: 'SRP', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'RUN', 'INFO', 'FILL', 'PSPD', 'PEAK', 'MINL', 'FLD', 'SPM'], key: ['WHP', 'RUN', 'FILL', 'PSPD'], req: ['WHP', 'RUN', 'INFO', 'FILL', 'PSPD'] },
+    SRP: { n: 'SRP', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'RUN', 'INFO', 'FILL', 'PSPD', 'PEAK', 'MINL', 'FLD'], key: ['WHP', 'RUN', 'FILL', 'PSPD'], req: ['WHP', 'RUN', 'INFO', 'FILL', 'PSPD'] },
     WSW: { n: 'WSW', f: ['WHP', 'FLP', 'CSGP', 'CSG', 'AMP', 'HZ', 'PI', 'PD', 'TI', 'TM'], key: ['WHP', 'AMP', 'HZ'], req: ['WHP', 'AMP', 'HZ'] },
     WIW: { n: 'WIW', f: ['WHIP', 'FLP', 'CSGP', 'CSG', 'INJ'], key: ['WHIP', 'INJ'], req: ['WHIP', 'INJ'] },
     GL: { n: 'Gas Lift', f: ['WHIP', 'FLP', 'DS', 'US', 'DIFF', 'TEMP', 'GINJ'], key: ['WHIP', 'DS', 'DIFF', 'GINJ'], req: ['WHIP', 'DS', 'DIFF', 'GINJ'] },
@@ -91,7 +93,7 @@
      the gas reading itself when it is read directly; a disconnected meter needs no gas fields. */
   function reqFields(w, cfg) {
     const T = TYPES[w.t]; if (!T) return [];
-    let r = (cfg && cfg.req && Array.isArray(cfg.req[w.t]) ? cfg.req[w.t] : T.req).filter(k => T.f.includes(k));
+    let r = [...new Set((cfg && cfg.req && Array.isArray(cfg.req[w.t]) ? cfg.req[w.t] : T.req).map(k => k === 'SPM' ? 'PSPD' : k))].filter(k => T.f.includes(k));   // SPM starred before v0.6.37 is the pump speed
     if (w.t === 'GL') r = r.filter(k => w.k > 0 ? k !== 'GINJ' : k !== 'DS' && k !== 'DIFF');
     if (w.disc) r = r.filter(k => !['DS', 'DIFF', 'GINJ', 'US'].includes(k));
     return r;
@@ -231,6 +233,6 @@
     h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
     return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
   }
-  const api = { NOSCAN, INJM, reqFields, progress, wAt, uhash, CHEMS, CHEM_N, CHEM_MIN, chemMin, FIELDS, TYPES, CSG, TYPE_ORDER, SIMPLE_REASONS, avocet, natural, dist, bearing, OTHER, INTERMITTENT, ymd, hhmm, stamp, addDays, prodDay, dayWindow, normNum, toNum, gasCalc, gasValue, gasDiff, openEvent, downMs, wholeH, wholeSplit, hfixOf, uptime, reasonsFor, isDone, summary, deviations, checks, exportSheets };
+  const api = { srpFix, NOSCAN, INJM, reqFields, progress, wAt, uhash, CHEMS, CHEM_N, CHEM_MIN, chemMin, FIELDS, TYPES, CSG, TYPE_ORDER, SIMPLE_REASONS, avocet, natural, dist, bearing, OTHER, INTERMITTENT, ymd, hhmm, stamp, addDays, prodDay, dayWindow, normNum, toNum, gasCalc, gasValue, gasDiff, openEvent, downMs, wholeH, wholeSplit, hfixOf, uptime, reasonsFor, isDone, summary, deviations, checks, exportSheets };
   if (typeof module === 'object' && module.exports) module.exports = api; else root.L = api;
 })(typeof self !== 'undefined' ? self : this);

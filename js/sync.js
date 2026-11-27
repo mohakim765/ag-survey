@@ -53,6 +53,7 @@
   }
   function set(k, d) {
     const s = S(), [p, a, b, c] = k.split('|'); d = unname(strip(d), s);
+    if (p === 'r' && d && d.v) root.L.srpFix(d.v);   // an old SRP reading: SPM is the pump speed
     if (DAY_KEYS[p]) { if (d) { const D = s.days[a] || (s.days[a] = { r: {}, d: {}, p: {}, c: {} }); (D[p] = D[p] || {})[b] = d; } else if (s.days[a] && s.days[a][p]) delete s.days[a][p][b]; return; }
     const upsert = (arr, id) => { const i = findFromEnd(arr, id); if (d) { if (i < 0) arr.push(d); else arr[i] = d; } else if (i >= 0) arr.splice(i, 1); };
     if (p === 'e') return upsert(s.dt, a);

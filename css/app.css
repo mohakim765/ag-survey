@@ -548,3 +548,5 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .hsearch svg{position:absolute;right:14px;top:50%;width:22px;height:22px;transform:translateY(-50%);color:var(--pen);pointer-events:none}
 .hsearch input{font-size:17px;padding-right:46px}
 .tag.ar{background:var(--pen2);border-color:var(--pen);color:var(--ink);font-weight:700}
+.tag.new{background:var(--bad);border-color:var(--bad);color:#fff;font-weight:700}
+.secev{margin:6px 0;padding:8px 10px;border-inline-start:4px solid var(--bad);background:var(--bad2);border-radius:6px}

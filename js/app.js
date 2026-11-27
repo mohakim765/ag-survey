@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.36';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.37';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -409,7 +409,7 @@
   const nReqs = () => isAdmin() ? pendingReqs().length : 0;
   function vUsers() {
     const reqs = pendingReqs(), q = latinDigits(V.q || '').trim().toLowerCase(), qd = digits(q), ua = u => esc(u.u);
-    let h = top('المستخدمين', `${Object.keys(S.users).length} حساب`, 'settings') + '<main class="wrap">' + devCard();
+    let h = top('المستخدمين', `${Object.keys(S.users).length} حساب`, 'settings') + '<main class="wrap">' + devCard(); secSeen();
     if (reqs.length) {
       h += `<section class="sec"><h3>طلبات مستنية <small>${reqs.length}</small></h3>`;
       for (const x of reqs) {
@@ -473,6 +473,7 @@
       h += `<div class="banner info inst"><span>${ios ? 'عشان تثبّته على الآيفون: من Safari دوس زرار المشاركة <b>⬆</b> وبعدين <b>Add to Home Screen</b>.' : window.__installEvt ? 'تقدر تثبّت البرنامج على الكمبيوتر وتفتحه من أيقونة.' : 'تقدر تثبّته من قايمة Chrome أو Edge: <b>Install Hudhud</b>.'}</span>${!ios && window.__installEvt ? '<button class="btn sm pen" data-act="install">ثبّت</button>' : ''}<button class="ib3 xs" data-act="noinst" aria-label="اقفل">×</button></div>`;
     }
     h += cardBanner();
+    if (isAdmin()) { const ev = secEvents(); if (ev.length) h += `<button class="banner bad wide" data-act="go" data-v="users">تنبيه أمان: ${esc(ev.map(e => e.short).join(' · '))} ← راجع</button>`; }
     if (isAdmin()) { const n = nReqs(); if (n) h += `<button class="banner info wide" data-act="go" data-v="users">فيه ${n === 1 ? 'طلب' : n + ' طلبات'} من المستخدمين مستني${n === 1 ? '' : 'ة'} ردك ←</button>`; }
     if (canWells()) h += `<div class="card"><label class="lab">اليوم اللي بتشوفه <em>(المهندس والأدمن بس يقدروا يفتحوا أيام فاتت ويعدّلوها)</em></label><input class="in" type="date" id="vday" value="${d}" max="${curDay()}"></div>`;
     else if (d !== curDay()) VDAY = null;
@@ -1183,7 +1184,7 @@
   function closeForm() {
     if (!FM) return;
     if (!flushForm()) { const b = formEl.querySelector('.bad'); if (b) b.focus(); return toast('فيه رقم غلط متحفظش. صلّحه أو امسحه'); }
-    FM = null; formEl.hidden = true; formEl.innerHTML = ''; document.body.classList.remove('lock'); render(); setTimeout(checkAlerts, 300);
+    FM = null; formEl.hidden = true; formEl.innerHTML = ''; document.body.classList.remove('lock'); render(); setTimeout(() => { checkAlerts(); if (isAdmin()) secCheck(); }, 300);
   }
   function savedTick() { const el = $('#fsv'); if (!el) return; el.innerHTML = ic('check') + 'اتحفظ'; el.classList.add('on'); clearTimeout(savedTick.t); savedTick.t = setTimeout(() => el.classList.remove('on'), 1800); }
   function fieldHtml(w, k, prev, ro, rq) {
@@ -2132,9 +2133,45 @@
     const old = devs.filter(d => d.old && d.st !== 'stop' && now - d.last < 30 * 864e5);
     let h = `<section class="sec"><h3>الأجهزة والدخول <small>${devs.length}</small></h3>`;
     h += (ai.locked || []).map(u => `<div class="urow"><div class="nm"><b>${esc(nm(u))}</b> <span class="tag bad">مقفول</span><small>${TRIES} محاولات غلط في الباسورد</small></div><div class="uact"><button class="btn sm pen" data-act="unlock" data-u="${esc(u)}">افتح الحساب</button></div></div>`).join('');
-    h += devs.map(d => `<div class="urow"><div class="nm"><b>${esc(d.users.map(nm).join('، ') || 'من غير اسم')}</b>${d.st === 'stop' ? ' <span class="tag bad">متوقف</span>' : d.old ? ' <span class="tag">من غير كارنيه</span>' : ''}${d.dev === mine ? ' <span class="tag">الموبايل ده</span>' : ''}<small>${d.app ? 'نسخة ' + esc(d.app) + ' · ' : ''}آخر اتصال من ${sinceTxt(d.last)}</small></div><div class="uact">${d.dev === mine ? '' : `<button class="btn sm" data-act="devst" data-d="${esc(d.dev)}" data-s="${d.st === 'stop' ? 'ok' : 'stop'}">${d.st === 'stop' ? 'رجّعه' : 'وقّفه'}</button>`}</div></div>`).join('');
+    const seen = (S.ui.sec || {}).devs || {}, isNew = d => S.ui.sec && d.dev !== mine && !d.old && (seen[d.dev] === undefined || d.users.some(u => !String(seen[d.dev]).split(',').includes(u)));
+    h += devs.map(d => `<div class="urow"><div class="nm"><b>${esc(d.users.map(nm).join('، ') || 'من غير اسم')}</b>${isNew(d) ? ' <span class="tag new">جديد</span>' : ''}${d.st === 'stop' ? ' <span class="tag bad">متوقف</span>' : d.old ? ' <span class="tag">من غير كارنيه</span>' : ''}${d.dev === mine ? ' <span class="tag">الموبايل ده</span>' : ''}<small>${d.app ? 'نسخة ' + esc(d.app) + ' · ' : ''}آخر اتصال من ${sinceTxt(d.last)}</small></div><div class="uact">${d.dev === mine ? '' : `<button class="btn sm" data-act="devst" data-d="${esc(d.dev)}" data-s="${d.st === 'stop' ? 'ok' : 'stop'}">${d.st === 'stop' ? 'رجّعه' : 'وقّفه'}</button>`}</div></div>`).join('');
     h += `<div class="card" style="margin-top:8px"><b>الدخول القديم من غير كارنيه: ${ai.legacy ? 'مفتوح' : 'مقفول'}</b><p class="mute" style="margin:4px 0 8px">${ai.legacy ? (old.length ? `${old.length === 1 ? 'جهاز واحد لسه شغال' : old.length + ' أجهزة لسه شغالة'} من غير كارنيه. لما كله ياخد كارنيه اقفله.` : 'كل الأجهزة اللي اتصلت آخر شهر معاها كارنيه. تقدر تقفله.') : 'أي جهاز من غير كارنيه مش هيبعت ولا يستلم لحد ما صاحبه يكتب الباسورد.'}</p><button class="btn ${ai.legacy ? 'pen' : ''}" data-act="legacy" data-s="${ai.legacy ? 0 : 1}">${ai.legacy ? 'اقفل الدخول القديم' : 'افتحه تاني'}</button></div>`;
     return h + `<p class="mute">الكارنيه بيتجدد لوحده كل شهر. الجهاز اللي يغيب 3 شهور لازم صاحبه يكتب الباسورد تاني.</p></section>`;
+  }
+  // the admin: an account locked after wrong passwords, a new device (or a new person on a device): a warning once, a banner until he looks
+  function secEvents() {
+    const ai = SYNC.admInfo && SYNC.admInfo(); if (!ai) return [];
+    const sec = S.ui.sec, mine = S.sync && S.sync.dev, nm = u => (S.users[u] && S.users[u].name) || u, out = [];
+    for (const u of ai.locked || []) if (!(sec && sec.locks && sec.locks[u])) out.push({ k: 'lk:' + u, short: `حساب ${nm(u)} اتقفل`, long: `حساب <b>${esc(nm(u))}</b> اتقفل بعد ${TRIES} محاولات غلط في الباسورد.` });
+    if (sec) for (const d of ai.devs || []) {
+      if (d.dev === mine || d.old) continue;
+      const was = sec.devs[d.dev], who = d.users.map(nm).join('، ') || 'من غير اسم';
+      if (was === undefined) out.push({ k: 'dv:' + d.dev, short: `جهاز جديد (${who})`, long: `<b>${esc(who)}</b> دخل من جهاز جديد${d.app ? ' · نسخة ' + esc(d.app) : ''} · من ${sinceTxt(d.last)}.` });
+      else { const add = d.users.filter(u => !String(was).split(',').includes(u)); if (add.length) out.push({ k: 'du:' + d.dev + ':' + add.join(','), short: `${add.map(nm).join('، ')} دخل على جهاز تاني`, long: `<b>${esc(add.map(nm).join('، '))}</b> دخل على جهاز ${esc(d.users.filter(u => !add.includes(u)).map(nm).join('، ') || 'تاني')}.` }); }
+    }
+    return out;
+  }
+  function secCheck() {
+    const ai = SYNC.admInfo && SYNC.admInfo(); if (!ai) return;
+    if (!S.ui.sec) { secSeen(true); }   // the first time: the devices already there are known, a locked account still warns
+    const al = S.ui.secAl || (S.ui.secAl = {});
+    for (const k in al) if (k.startsWith('lk:') && !(ai.locked || []).includes(k.slice(3))) delete al[k];   // opened: a new lock warns again
+    const fresh = secEvents().filter(e => !al[e.k]); save();
+    if (!fresh.length) return;
+    if (V.v === 'home' && !FM) render();   // the banner
+    if (FM || !modalEl.hidden) return;     // busy: the next sync (or closing the form) warns
+    for (const e of fresh) al[e.k] = 1; save();
+    try { if (navigator.vibrate) navigator.vibrate([250, 120, 250]); } catch (e) { }
+    modal(`<h3>تنبيه أمان</h3>${fresh.slice(0, 6).map(e => `<p class="secev">${e.long}</p>`).join('')}${fresh.some(e => e.k[0] === 'd') ? '<p class="mute">لو ده مش حد تعرفه، وقّف الجهاز من صفحة المستخدمين.</p>' : ''}${fresh.some(e => e.k.startsWith('lk:')) ? '<p class="mute">كلّم صاحب الحساب واتأكد إنه هو اللي غلط قبل ما تفتحه.</p>' : ''}
+      <div class="btns" style="margin-top:12px"><button class="btn" data-act="mclose">بعدين</button><button class="btn pen" data-act="secgo">افتح المستخدمين</button></div>`);
+  }
+  // what the admin has looked at in the users page
+  function secSeen(first) {
+    const ai = SYNC.admInfo && SYNC.admInfo(); if (!ai) return;
+    const s = S.ui.sec || { devs: {}, locks: {} };
+    for (const d of ai.devs || []) s.devs[d.dev] = d.users.join(',');
+    s.locks = {}; if (!first) for (const u of ai.locked || []) s.locks[u] = 1;
+    S.ui.sec = s; save();
   }
   function devAct(b) {
     const ai = SYNC.admInfo(), now = Date.now(), act = b.dataset.act;
@@ -2263,6 +2300,7 @@
       case 'loginas': { const u = b.dataset.u; if (!PICK || !PICK.has(u)) return closeModal(); return loginAs(u); }
       case 'activate': return doActivate();
       case 'cardok': return cardOk();
+      case 'secgo': closeModal(); return go('users');
       case 'unlock': case 'devst': case 'legacy': return isAdmin() ? devAct(b) : null;
       case 'logout': if (FM) closeForm(); S.me = null; VDAY = null; save(); V = { v: 'home' }; return render();
       case 'pinchg': return pinBox();
@@ -2466,6 +2504,7 @@
     if (r.repChanged && canWells()) { const last = Object.values(S.reps || {}).sort((a, b) => b.t - a.t)[0]; if (last && last.t > (S.ui.rpSeen || 0)) { S.ui.rpSeen = last.t; save(); toast(`${last.byn || 'حد'} عمل مقارنة مع تقرير يوم ${last.day}: اتقفل ${last.close.length} بير`); } }
     if (isAdmin()) { const n = nReqs(); if (n > (S.ui.nreq || 0)) toast(n === 1 ? 'فيه طلب جديد في المستخدمين' : `فيه ${n} طلبات في المستخدمين`); if (n !== (S.ui.nreq || 0)) { S.ui.nreq = n; save(); } }
     document.querySelectorAll('[data-sync]').forEach(el => el.innerHTML = syncLine());
+    if (isAdmin()) secCheck();   // security first
     if (r.got) checkAlerts();
     if (SEED_NEW) { SEED_NEW = false; toast('بيانات الآبار اتحدثت. اقفل البرنامج وافتحه تاني'); }
     if (r.manual) { const st = SYNC.status(); toast(st.err ? 'مقدرتش أبعت: ' + st.err : `اتبعت ${r.sent} واستلمت ${r.got}`); }
@@ -2492,6 +2531,7 @@
     try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { }
     if (!S.ui.here) S.ui.here = Object.keys(S.users);
     for (const m of ['ucode', 'ureq', 'uprof', 'reps']) if (!S[m] || typeof S[m] !== 'object') S[m] = {};
+    for (const d in S.days) for (const id in (S.days[d].r || {})) { const x = S.days[d].r[id]; if (x && x.v) L.srpFix(x.v); }   // v0.6.37: SPM is the pump speed
     for (const d in S.reps) if (d < L.addDays(curDay(), -60)) delete S.reps[d];
     delete S.admin; seedAdmin();
     SYNC.init({ getS: () => S, save, meta: syncMeta, onDone: syncDone, onGone, seedPart, onSeed, cutDay: () => L.addDays(curDay(), -60), version: VERSION, bgOn: () => !!BG(), before: bgTake });
