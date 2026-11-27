@@ -538,3 +538,8 @@ button.banner{display:block;width:100%;text-align:start;font:inherit;font-size:1
 .pmhow{margin:10px 0 6px;padding-inline-start:22px;line-height:1.7}
 .iro{display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;color:var(--ink2,inherit)}
 .iro .in{width:80px}
+/* v0.6.35: personal cards */
+.banner.bad{background:var(--bad2);color:var(--bad);border-color:var(--bad)}
+.banner .btn.sm{margin-top:8px;display:inline-flex}
+.tag.bad{background:var(--bad2);border-color:var(--bad);color:var(--bad)}
+.cardok{border-color:var(--pen)}

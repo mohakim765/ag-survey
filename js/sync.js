@@ -39,6 +39,9 @@
     if (p === 'en') return s.eng && s.eng[a] ? clone(s.eng[a]) : null;       // Rig & Rigless of an engineering report
     if (p === 'as') return s.avs && s.avs[a] ? clone(s.avs[a]) : null;       // the last Avocet sheet of a day (what changed since)
     if (p === 'hf') return s.hfix && s.hfix[a] && s.hfix[a][b] ? clone(s.hfix[a][b]) : null;   // a well's hours a report set for a day
+    if (p === 'lk') return s.locks && s.locks[a] ? clone(s.locks[a]) : null;   // an account locked after 7 wrong passwords (only the admin opens it)
+    if (p === 'dv') return s.devst && s.devst[a] ? clone(s.devst[a]) : null;   // the admin stopped / brought back a device
+    if (p === 'sec') return s.sec ? clone(s.sec) : null;                       // the admin closed / opened the old shared key
     return null;
   }
   // a record written by a person who was removed (their old phone): keep the values, drop the name
@@ -62,7 +65,14 @@
     if (p === 'wx') { if (d) s.cfg.wfx = d; return; }
     if (p === 'tk') { if (d) s.cfg.mtk = d; return; }
     if (p === 'cs') { if (d) { for (const f of ['prodDayStart', 'dieselMin', 'gasDiffPct']) if (typeof d[f] === 'number') s.cfg[f] = d[f]; if (d.chemMin && typeof d.chemMin === 'object') s.cfg.chemMin = d.chemMin; if (d.req && typeof d.req === 'object' && !Array.isArray(d.req)) s.cfg.req = d.req; } return; }
-    if (p === 'u') { if (d && !(s.gone && s.gone[root.L.uhash(a)])) s.users[a] = d; return; }   // a removed person never comes back
+    if (p === 'u') {   // a removed person never comes back
+      if (!d || (s.gone && s.gone[root.L.uhash(a)])) return;
+      if (d.nph) { const o = s.users[a]; d = Object.assign({}, d); delete d.nph; if (o && o.ph && (o.pt || 0) === (d.pt || 0)) d.ph = o.ph; }   // the sheet keeps other people's password; a known one stays if it did not change
+      s.users[a] = d; return;
+    }
+    if (p === 'lk') { s.locks = s.locks || {}; if (d && d.on) s.locks[a] = d; else delete s.locks[a]; return; }
+    if (p === 'dv') { s.devst = s.devst || {}; if (d) s.devst[a] = d; else delete s.devst[a]; return; }
+    if (p === 'sec') { if (d) s.sec = d; return; }
     if (UMAP[p]) { const m = s[UMAP[p]] || (s[UMAP[p]] = {}); if (d && !(s.gone && s.gone[root.L.uhash(a)])) m[a] = d; else delete m[a]; return; }
     if (p === 'sd') { if (C.onSeed) C.onSeed(a, +b, d); return; }
     if (p === 'ux') { if (d && d.del) { s.gone = s.gone || {}; s.gone[a] = 1; if (C.onGone) C.onGone(a); } return; }
@@ -99,6 +109,7 @@
     for (const u in s.users) if (!s.users[u]._seed) put('u|' + u, s.users[u].at);   // the admin account from the seed is on every phone already
     for (const p in UMAP) for (const u in s[UMAP[p]] || {}) put(p + '|' + u, s[UMAP[p]][u].t);
     for (const h in s.gone || {}) put('ux|' + h);
+    for (const u in s.locks || {}) put('lk|' + u, s.locks[u].t);
     for (const d in s.reps || {}) put('rp|' + d, s.reps[d].t);
     for (const id in s.tests || {}) put('wt|' + id, s.tests[id].t);
     for (const d in s.eng || {}) put('en|' + d, s.eng[d].t);
@@ -116,18 +127,23 @@
 
   const url = () => ((st() && st().url) || (root.CONFIG && root.CONFIG.syncUrl) || '').trim();
   const key = () => (root.CONFIG && root.CONFIG.syncKey) || '';
+  // who the phone is: its own card (from the sheet, after the password), or the shared key of the old versions
+  const auth = y => y.tok ? { tok: y.tok } : key() ? { key: key() } : null;
+  const AUTH = { login: 1, locked: 1, stopped: 1 };
   function schedule(ms) { if (!url()) return; clearTimeout(timer); timer = setTimeout(() => run(false), ms); }
 
-  async function post(body) {
+  async function post(body, raw) {
     const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null, to = setTimeout(() => ctl && ctl.abort(), 30000);
     try {
       const r = await fetch(url(), { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), signal: ctl ? ctl.signal : undefined, redirect: 'follow' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = JSON.parse(await r.text());
       if (j && j.err === 'busy') throw Object.assign(new Error('الشيت مشغول، هيحاول تاني لوحده'), { net: true });
+      if (raw || (j && j.op)) return j;
+      if (j && !j.ok && (AUTH[j.err] || j.err === 'key')) throw Object.assign(new Error(j.err === 'locked' ? 'الحساب مقفول، كلّم الأدمن' : j.err === 'stopped' ? 'الجهاز ده متوقف من الأدمن' : 'محتاج تكتب الباسورد مرة'), { auth: j.err === 'key' ? 'login' : j.err });   // key: the admin closed the old shared key
       if (!j || !j.ok) throw new Error(j && j.err === 'key' ? 'مفتاح الربط غلط' : (j && j.err) || 'رد غلط من الشيت'); return j;
     } catch (e) {
-      if (e.net) throw e;
+      if (e.net || e.auth) throw e;
       const net = e.name === 'AbortError' || e instanceof TypeError; // no network / too slow: normal in the field, the queue waits
       const m = e.name === 'AbortError' ? 'النت ضعيف والطلب اتأخر' : e instanceof TypeError ? 'مفيش نت' : e instanceof SyntaxError ? 'الشيت رد برد غلط. اتأكد من الرابط ومن الـ Deploy' : /^HTTP \d/.test(e.message) ? 'الشيت مش بيرد (' + e.message + ')' : e.message || String(e);
       throw Object.assign(new Error(m), { net });
@@ -150,7 +166,7 @@
     if (m && from.length && u === String(root.CONFIG.syncUrl || '').trim() && y.seeded && (!y.at || from.includes(y.at))) {
       y.cursor = Math.min(y.cursor, Number(m.rows) || 0);
       eachKey((k, rt) => { const v = y.mt[k] || Number(rt) || 0; if (v >= m.t && !y.dirty[k]) y.dirty[k] = v; });
-    } else if (y.at) { y.cursor = 0; y.seeded = false; }
+    } else if (y.at) { y.cursor = 0; y.seeded = false; y.tok = ''; y.gen = 0; }
     y.at = u;
   }
   async function doRun(manual) {
@@ -165,9 +181,15 @@
       for (let loop = 0; loop < 40; loop++) {
         const keys = Object.keys(y.dirty).sort((a, b) => y.dirty[a] - y.dirty[b]).slice(0, 300);
         const changes = keys.map(k => ({ k, t: y.dirty[k], u: S().me || '', d: C.meta(k, get(k)) }));
-        const res = await post({ key: key(), dev: y.dev, cursor: y.cursor, changes, app: C.version });
+        const who = auth(y); if (!who) throw Object.assign(new Error('محتاج تكتب الباسورد مرة'), { auth: 'login' });
+        const res = await post(Object.assign({ dev: y.dev, cursor: y.cursor, changes, app: C.version, u: S().me || '' }, who));
+        y.auth = '';
+        if (res.renew) y.tok = res.renew;   // the card renews itself every 30 days
+        if (res.devs) y.adm = { devs: res.devs, locked: res.locked || [], legacy: res.legacy !== false, t: Date.now() };
+        const regen = !!(res.gen && y.gen && res.gen !== y.gen); if (res.gen) y.gen = res.gen;
         for (const c of changes) if (y.dirty[c.k] === c.t) delete y.dirty[c.k];
         sent += changes.length;
+        if (regen) { y.cursor = 0; continue; }   // the sheet cleaned its log: read it again from the start (nothing to send again)
         if (res.reset) { y.cursor = 0; seedAll(); continue; }
         for (const c of res.changes || []) {
           if (c.dev === y.dev) continue;
@@ -187,11 +209,11 @@
       }
       y.last = Date.now(); y.err = ''; y.net = false; prune();
       return { ok: true, got, sent };
-    } catch (e) { y.err = e.message || String(e); y.net = !!e.net; return { ok: false, err: y.err }; }
+    } catch (e) { y.err = e.message || String(e); y.net = !!e.net; if (e.auth) { y.auth = e.auth; if (e.auth === 'login') y.tok = ''; } return { ok: false, err: y.err, auth: e.auth || '' }; }
     finally {
       running = false; const m = manual || manualAsk; manualAsk = false; C.save(); C.onDone({ got, sent, cfgChanged, usersChanged, repChanged, manual: m });
       // still something to send: try again soon (no network: every 20 seconds, so it goes as soon as the network is back)
-      if (Object.keys(y.dirty).length) schedule(!y.err ? 3000 : y.net ? 20000 : 60000);
+      if (Object.keys(y.dirty).length && !y.auth) schedule(!y.err ? 3000 : y.net ? 20000 : 60000);
     }
   }
   // forget modification times of old days (only recent days can still be edited)
@@ -199,19 +221,30 @@
     const y = st(), cut = C.cutDay(); if (!cut) return;
     for (const k in y.mt) { const p = k.split('|'); if ((DAY_KEYS[p[0]] || p[0] === 'ps' || p[0] === 'pj' || p[0] === 'rp' || p[0] === 'en' || p[0] === 'as' || p[0] === 'hf' || PLAN[p[0]]) && p[1] < cut && !y.dirty[k]) delete y.mt[k]; }
   }
-  function status() { const y = st() || {}; return { linked: !!url(), pending: Object.keys(y.dirty || {}).length, last: y.last || 0, err: y.err || '', net: !!y.net, running }; }
+  function status() { const y = st() || {}; return { linked: !!url(), pending: Object.keys(y.dirty || {}).length, last: y.last || 0, err: y.err || '', net: !!y.net, running, auth: y.auth || (url() && !auth(y) ? 'login' : ''), card: !!y.tok }; }
+  // log in, new account, activation, forgotten password: asked of the sheet (no card needed). Throws only when there is no network.
+  async function authOp(op, o) {
+    const y = st(); if (!y || !url()) throw Object.assign(new Error('مش متربط بالشيت'), { net: true });
+    let j;
+    try { j = await post(Object.assign({}, o, { op, dev: y.dev, app: C.version }), true); }
+    catch (e) { if (e.net) throw e; j = { ok: false, err: String(e.message || e) }; }
+    if (j.ok && j.tok) { y.tok = j.tok; y.auth = ''; y.err = ''; if (!y.seeded) seedAll(); C.save(); schedule(300); }
+    return j;
+  }
+  const admInfo = () => (st() && st().adm) || null;
 
   function init(ctx) {
     C = ctx; const s = S();
-    s.sync = Object.assign({ url: '', dev: '', cursor: 0, last: 0, dirty: {}, mt: {}, seeded: false, err: '' }, s.sync || {});
+    s.sync = Object.assign({ url: '', dev: '', cursor: 0, last: 0, dirty: {}, mt: {}, seeded: false, err: '', tok: '', gen: 0, auth: '' }, s.sync || {});
     if (!s.sync.dev) s.sync.dev = 'd' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const W = root.CONFIG || {}; if (W.syncTok && W.syncDev && !s.sync.tok) { s.sync.tok = W.syncTok; s.sync.dev = W.syncDev; }   // the web version logged in before the app started
     moved();
     setInterval(() => { if (!document.hidden && Date.now() - lastRun > 80000) run(false); }, 30000);
     window.addEventListener('online', () => schedule(1000));
     document.addEventListener('visibilitychange', () => { if (!document.hidden) schedule(1500); });
     schedule(2000);
   }
-  function setUrl(u) { st().url = (u || '').trim(); st().seeded = false; st().cursor = 0; st().at = url(); C.save(); schedule(500); }
+  function setUrl(u) { st().url = (u || '').trim(); st().seeded = false; st().cursor = 0; st().at = url(); st().tok = ''; st().gen = 0; C.save(); schedule(500); }
   function each(fn) { const ks = []; eachKey(k => ks.push(k)); for (const k of ks) fn(k); }
   // for the phone's background job: the request the app would send now (the oldest changes first)
   function outbox(max) {
@@ -219,10 +252,11 @@
     const keys = Object.keys(y.dirty).sort((a, b) => y.dirty[a] - y.dirty[b]).slice(0, max || 1000); if (!keys.length) return null;
     const changes = keys.map(k => ({ k, t: y.dirty[k], u: S().me || '', d: C.meta(k, get(k)) })), sent = {};
     for (const c of changes) sent[c.k] = c.t;
-    return { url: url(), body: JSON.stringify({ key: key(), dev: y.dev, cursor: y.cursor, changes, app: C.version, bg: 1 }), keys: sent };
+    const who = auth(y); if (!who || y.auth) return null;
+    return { url: url(), body: JSON.stringify(Object.assign({ dev: y.dev, cursor: y.cursor, changes, app: C.version, bg: 1, u: S().me || '' }, who)), keys: sent };
   }
   // the background job sent these: they are not waiting any more (unless they changed again since)
   function sentBy(keys) { const y = st(); let n = 0; if (!y) return 0; for (const k in keys || {}) if (y.dirty[k] === keys[k]) { delete y.dirty[k]; n++; } if (n) { y.last = Date.now(); y.err = ''; y.net = false; } return n; }
   function forget(k) { const y = st(); if (y) { delete y.dirty[k]; delete y.mt[k]; } }
-  root.SYNC = { init, mark, run, status, setUrl, url, each, forget, outbox, sentBy, schedule, _get: get, _set: set };
+  root.SYNC = { init, mark, run, status, setUrl, url, each, forget, outbox, sentBy, schedule, authOp, admInfo, _get: get, _set: set };
 })(typeof self !== 'undefined' ? self : this);

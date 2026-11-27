@@ -1,7 +1,7 @@
 /* AG Survey (سيرفاي الآبار) — UI. Offline-first; all data stays on the phone until the sync step is added. */
 (function () {
   'use strict';
-  const L = window.L, SEED = window.SEED, VERSION = '0.6.34';
+  const L = window.L, SEED = window.SEED, VERSION = '0.6.35';
   const $ = s => document.querySelector(s);
   const app = $('#app'), formEl = $('#form'), modalEl = $('#modal'), toastEl = $('#toast');
   const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -176,6 +176,23 @@
     const u = s.toLowerCase(); return S.users[u] ? [S.users[u]] : [];
   }
   const pinHash = (u, k) => sha('ws:' + u + ':' + k);
+  // the sheet checks the password and gives this phone its own card (also a new phone). Without network: the accounts already on the phone.
+  const online = () => !!(window.SYNC && SYNC.url());
+  function putUsers(list) { for (const x of list || []) { if (!x || !x.u) continue; const o = S.users[x.u], n = Object.assign({}, x); if (o && o.ph && !n.ph) n.ph = o.ph; S.users[x.u] = n; if (S.locks) delete S.locks[x.u]; if (S.ui.tries) delete S.ui.tries[x.u]; } }
+  const lockOf = u => !!(S.locks && S.locks[u] && S.locks[u].on);
+  const TRIES = 7;
+  // a wrong password without network: 7 lock the account on this phone too, until the admin opens it
+  function offWrong(us) {
+    S.ui.tries = S.ui.tries || {}; let locked = false, n = 0;
+    for (const u of us) { const k = (S.ui.tries[u] || 0) + 1; S.ui.tries[u] = k; n = Math.max(n, k); if (k >= TRIES) { S.locks = S.locks || {}; S.locks[u] = { on: 1, n: k, t: Date.now(), why: 'offline' }; delete S.ui.tries[u]; mark('lk|' + u); locked = true; } }
+    save(); return locked ? 0 : TRIES - n;
+  }
+  const leftTxt = n => n > 0 ? `. فاضل ${n === 1 ? 'محاولة واحدة' : n === 2 ? 'محاولتين' : n + ' محاولات'} وبعدها الحساب يتقفل` : '';
+  function lockedBox(u) {
+    const x = u && S.users[u], msg = `السلام عليكم، أنا ${x ? x.name : ''} على AG Survey${u ? ` (${u})` : ''}.\nالحساب اتقفل بعد محاولات غلط في الباسورد، محتاج تفتحه.`;
+    modal(`<h3>الحساب مقفول</h3><p>اتقفل بعد ${TRIES} محاولات غلط في الباسورد. الأدمن بس يقدر يفتحه، ولو عاوز باسورد جديد يبعتلك كود.</p>${adminPhone() ? waA(adminPhone(), msg, 'كلّم الأدمن على الواتساب', 'wide') : ''}<div class="btns" style="margin-top:10px"><button class="btn" data-act="mclose">تمام</button></div>`);
+  }
+  function pickBox(ok) { PICK = new Set(ok.map(x => x.u)); return modal(`<h3>تدخل بأنهي حساب؟</h3>${ok.map(x => `<button class="btn wide" style="margin-top:8px" data-act="loginas" data-u="${esc(x.u)}">${esc(x.name)} <small dir="ltr">${esc(x.u)}</small></button>`).join('')}<div class="btns" style="margin-top:12px"><button class="btn" data-act="mclose">إلغاء</button></div>`); }
   const codeHash = (u, t, k) => sha('wscode:' + u + ':' + t + ':' + k);
   function busyBtn(b, txt) { if (!b) return; if (txt) { if (!b.dataset.t0) b.dataset.t0 = b.innerHTML; b.disabled = true; b.textContent = txt; } else { b.disabled = false; if (b.dataset.t0) { b.innerHTML = b.dataset.t0; delete b.dataset.t0; } } }
   // a new phone has no accounts yet, and a password may have changed on another phone: get the latest from the sheet
@@ -215,6 +232,13 @@
     if (!/^[a-z][a-z0-9._-]{2,19}$/.test(u)) return toast('اسم المستخدم: حروف إنجليزي وأرقام، من 3 لـ 20');
     if (!/^\d{4}$/.test(k)) return toast('الباسورد لازم 4 أرقام');
     if (k !== k2) return toast('الباسوردين مش زي بعض');
+    if (online()) {   // the sheet makes the account (it checks the name and the number against every account)
+      const b = $('[data-act=register]'); busyBtn(b, 'بيسجّل في الشيت…'); let r;
+      try { r = await SYNC.authOp('register', { u, name, emp, phone, ph: await pinHash(u, k) }); } catch (e) { busyBtn(b, ''); return toast('التسجيل محتاج نت. جرّب تاني لما يبقى فيه نت'); }
+      busyBtn(b, '');
+      if (!r.ok) return toast(r.err === 'taken' ? 'اسم المستخدم ده مش متاح، اختار غيره' : r.err === 'phone' ? 'الرقم ده عليه حساب. ادخل بيه، ولو ناسي الباسورد دوس "نسيت الباسورد"' : r.err === 'busy' ? 'فيه حسابات كتير مستنية الأدمن. كلّمه الأول' : 'راجع البيانات وجرّب تاني');
+      putUsers(r.users); S.me = u; S.ui.here = [...new Set([...(S.ui.here || []), u])]; audit('user', u, 'تسجيل', '', name, curDay()); await saveNow(); V = { v: 'home' }; return render();
+    }
     await pull($('[data-act=register]'));   // the name and the number are checked against every account, also on a new phone
     if (S.users[u] || u === ADM() || (S.gone && S.gone[L.uhash(u)])) return toast('اسم المستخدم ده مش متاح، اختار غيره');
     if (phoneKey(adminPhone()) === phone || findAccounts(phone).length) return toast('الرقم ده عليه حساب. ادخل بيه، ولو ناسي الباسورد دوس "نسيت الباسورد"');
@@ -223,18 +247,35 @@
   }
   let PICK = null; // accounts that matched the phone number and the password (the user chooses one)
   async function doLogin() {
-    if (lockedOut()) return;
     const idf = (($('#lu') || {}).value || '').trim(), k = L.normNum((($('#lp') || {}).value || '').trim()); V.lu = idf;
     if (!idf) return toast('اكتب اسم المستخدم أو رقم الموبايل');
     if (!/^\d{4}$/.test(k)) return toast('الباسورد 4 أرقام');
-    const check = async () => { const out = []; for (const x of findAccounts(idf)) if (x.ph && x.ph === await pinHash(x.u, k)) out.push(x); return out; };
-    let ok = await check();
-    if (!ok.length && SYNC.url()) { await pull($('[data-act=login]'), 'بيدوّر على حسابك…'); ok = await check(); }
-    if (!findAccounts(idf).length) { const st = SYNC.status(); return toast(st.linked && st.err && st.net ? 'الحساب لسه منزلش على الموبايل ده ومفيش نت. جرّب تاني لما يبقى فيه نت' : 'مفيش حساب بالاسم أو الرقم ده. لو أول مرة، سجّل حساب جديد'); }
-    if (!ok.length) { wrongTry(); const p = $('#lp'); if (p) p.value = ''; return toast('الباسورد غلط'); }
-    okTry();
-    if (ok.length > 1) { PICK = new Set(ok.map(x => x.u)); return modal(`<h3>تدخل بأنهي حساب؟</h3>${ok.map(x => `<button class="btn wide" style="margin-top:8px" data-act="loginas" data-u="${esc(x.u)}">${esc(x.name)} <small dir="ltr">${esc(x.u)}</small></button>`).join('')}<div class="btns" style="margin-top:12px"><button class="btn" data-act="mclose">إلغاء</button></div>`); }
-    loginAs(ok[0].u);
+    const clr = () => { const p = $('#lp'); if (p) p.value = ''; };
+    if (online()) {
+      const b = $('[data-act=login]'), la = findAccounts(idf);
+      if (la.length && la.every(x => lockOf(x.u))) { await pull(b); if (la.every(x => lockOf(x.u))) return lockedBox(la[0].u); }   // locked on this phone: maybe the admin opened it already
+      busyBtn(b, 'بيتأكد من الشيت…'); let r = null;
+      try { r = await SYNC.authOp('login', { idf, pin: k }); } catch (e) { r = null; }   // no network: the accounts on this phone
+      busyBtn(b, '');
+      if (r && (r.ok || r.err === 'wait')) { putUsers(r.users); save(); }
+      if (r && r.ok) { await pull(b); const ok = r.users.map(x => S.users[x.u]).filter(Boolean); return ok.length > 1 ? pickBox(ok) : loginAs(ok[0].u); }
+      if (r && r.err === 'wait') { S.me = r.users[0].u; S.ui.here = [...new Set([...(S.ui.here || []), S.me])]; save(); return render(); }
+      if (r && r.err === 'locked') { clr(); const a = findAccounts(idf); return lockedBox(a.length === 1 ? a[0].u : ''); }
+      if (r && r.err === 'pin') { clr(); return toast('الباسورد غلط' + leftTxt(r.left)); }
+      if (r && r.err === 'stopped') return toast('الموبايل ده متوقف من الأدمن. كلّمه.');
+      if (r && r.err !== 'nouser') return toast('مقدرش يدخل: ' + r.err);
+      if (r && !findAccounts(idf).length) return toast('مفيش حساب بالاسم أو الرقم ده');
+    }
+    // no network (or the sheet doesn't know the account yet): the passwords already on this phone
+    const acc = findAccounts(idf);
+    if (!acc.length) { const st = SYNC.status(); return toast(st.linked && st.err && st.net ? 'الحساب لسه منزلش على الموبايل ده ومفيش نت. جرّب تاني لما يبقى فيه نت' : 'مفيش حساب بالاسم أو الرقم ده'); }
+    const open = acc.filter(x => !lockOf(x.u)); if (!open.length) return lockedBox(acc[0].u);
+    const known = open.filter(x => x.ph); if (!known.length) return toast('مفيش نت. أول دخول لحسابك على الموبايل ده محتاج نت');
+    const ok = []; for (const x of known) if (x.ph === await pinHash(x.u, k)) ok.push(x);
+    if (!ok.length) { clr(); const left = offWrong(known.map(x => x.u)); return left ? toast('الباسورد غلط' + leftTxt(left)) : lockedBox(known[0].u); }
+    if (S.ui.tries) for (const x of ok) delete S.ui.tries[x.u];
+    okTry(); save();
+    return ok.length > 1 ? pickBox(ok) : loginAs(ok[0].u);
   }
   function loginAs(u) {
     closeModal(); PICK = null; S.me = u; S.ui.here = [...new Set([...(S.ui.here || []), u])]; VDAY = null; V = { v: 'home' }; save(); render();
@@ -242,11 +283,11 @@
   }
   // forgot the password: a request goes to the admin, he sends a code on WhatsApp, the code + a new password open the account
   function vForgot() {
-    const u = V.fu && S.users[V.fu];
+    const u = V.fu && (V.finfo || S.users[V.fu]);
     let h = `<main class="wrap auth"><img class="logoimg" src="img/icon.webp" alt=""><h1 class="center" style="margin:0">نسيت الباسورد</h1>`;
     if (!u) return h + `<p class="center mute">اكتب اسم المستخدم أو رقم الموبايل اللي سجلت بيه. هيوصل طلب للأدمن، وهو هيبعتلك كود على الواتساب.</p>
       <div class="card"><label class="lab">اسم المستخدم أو رقم الموبايل</label><input class="in" id="fu" dir="ltr" autocapitalize="off" value="${esc(V.lu || '')}"><button class="btn pen wide" data-act="forgot1">كمّل</button></div><button class="btn wide" data-act="tolog">رجوع للدخول</button></main>`;
-    const msg = `السلام عليكم، أنا ${u.name} على AG Survey (${u.u}).\nنسيت الباسورد، محتاج كود.`, mask = String(u.phone || '').replace(/^(\d{3})\d+(\d{3})$/, '$1•••••$2');
+    const msg = `السلام عليكم، أنا ${u.name} على AG Survey (${u.u}).\nنسيت الباسورد، محتاج كود.`, mask = String(u.phone || '').replace(/^(\d{3})\d+(\d{3})$/, '$1•••••$2');   // the sheet sends it masked already
     return h + `<p class="center mute">حساب ${esc(firstName(u.name))} · اتبعت طلب للأدمن. هيبعتلك كود 4 أرقام على الواتساب على رقمك <bdi dir="ltr">${esc(mask)}</bdi>.</p>
       <div class="card">${adminPhone() ? waA(adminPhone(), msg, 'كلّم الأدمن على الواتساب', 'wide') : ''}
       <label class="lab" style="margin-top:12px">الكود اللي وصلك</label><div class="pinrow"><input id="fc" inputmode="numeric" maxlength="4" autocomplete="one-time-code"></div>
@@ -255,6 +296,13 @@
   }
   async function forgot1() {
     const idf = (($('#fu') || {}).value || '').trim(); V.lu = idf; if (!idf) return toast('اكتب اسم المستخدم أو رقم الموبايل');
+    if (online()) {
+      const b = $('[data-act=forgot1]'); busyBtn(b, 'بيدوّر على حسابك…'); let r;
+      try { r = await SYNC.authOp('forgot', { idf }); } catch (e) { busyBtn(b, ''); return toast('محتاج نت عشان الطلب يوصل للأدمن'); }
+      busyBtn(b, '');
+      if (!r.ok) return toast(r.err === 'many' ? 'الرقم ده عليه أكتر من حساب. اكتب اسم المستخدم' : 'مفيش حساب بالاسم أو الرقم ده');
+      V.fu = r.users[0].u; V.finfo = r.users[0]; return render();
+    }
     let c = findAccounts(idf); if (!c.length) { await pull($('[data-act=forgot1]'), 'بيدوّر على حسابك…'); c = findAccounts(idf); }
     if (!c.length) return toast('مفيش حساب بالاسم أو الرقم ده');
     if (c.length > 1) return toast('الرقم ده عليه أكتر من حساب. اكتب اسم المستخدم');
@@ -265,6 +313,16 @@
   async function forgot2() {
     if (lockedOut()) return;
     const u = V.fu, v = id => L.normNum((($('#' + id) || {}).value || '').trim()), c = v('fc'), k = v('fk'), k2 = v('fk2');
+    if (online() && V.finfo) {   // the sheet checks the admin's code
+      if (!/^\d{4}$/.test(c)) return toast('اكتب الكود اللي وصلك (4 أرقام)');
+      if (!/^\d{4}$/.test(k)) return toast('الباسورد الجديد 4 أرقام'); if (k !== k2) return toast('الباسوردين مش زي بعض');
+      const b = $('[data-act=forgot2]'); busyBtn(b, 'بيتأكد من الكود…'); let r;
+      try { r = await SYNC.authOp('reset', { u, code: c, ph: await pinHash(u, k) }); } catch (e) { busyBtn(b, ''); return toast('محتاج نت عشان يتأكد من الكود'); }
+      busyBtn(b, '');
+      if (!r.ok) return toast(codeErr(r));
+      putUsers(r.users); V.finfo = null; save(); await pull(b);
+      audit('user', u, 'الباسورد', '', 'اتغير بكود من الأدمن', curDay()); loginAs(u); SYNC.run(false); return toast('اتغير الباسورد');
+    }
     if (!S.users[u]) return;
     if (!/^\d{4}$/.test(c)) return toast('اكتب الكود اللي وصلك (4 أرقام)');
     if (!/^\d{4}$/.test(k)) return toast('الباسورد الجديد 4 أرقام'); if (k !== k2) return toast('الباسوردين مش زي بعض');
@@ -276,6 +334,7 @@
   }
   // a code the admin sent: true, or why it can't be used. It works once, for 3 days, 5 wrong tries at most.
   const CODE_BAD = 'الكود غلط';
+  const codeErr = r => r.err === 'code' ? CODE_BAD + (r.left ? ` (فاضل ${r.left})` : '') : r.err === 'old' ? 'الكود ده قديم. اطلب كود جديد من الأدمن' : r.err === 'used' ? 'الكود ده اتقفل بعد 5 محاولات غلط. اطلب كود جديد' : r.err === 'nocode' ? 'الكود لسه موصلش للشيت. اتأكد إن الأدمن بعته وجرّب تاني' : r.err === 'stopped' ? 'الموبايل ده متوقف من الأدمن' : r.err === 'nouser' ? 'الحساب ده مش موجود' : 'مقدرش: ' + r.err;
   async function useCode(u, p, k) {
     const c = S.ucode[u];
     if (!c || c.p !== p) return 'الكود لسه موصلش للموبايل. اتأكد إن الأدمن بعته وإن فيه نت، وجرّب تاني';
@@ -298,6 +357,15 @@
   async function doActivate() {
     if (lockedOut()) return;
     const k = L.normNum((($('#ac') || {}).value || '').trim()); if (!/^\d{4}$/.test(k)) return toast('الكود 4 أرقام');
+    if (online()) {   // the sheet checks the code and gives this phone its card
+      const x = me(); if (!x) return render();
+      const b = $('[data-act=activate]'); busyBtn(b, 'بيتأكد من الكود…'); let r;
+      try { r = await SYNC.authOp('activate', { u: x.u, code: k }); } catch (e) { busyBtn(b, ''); return toast('التفعيل محتاج نت. جرّب تاني لما يبقى فيه نت'); }
+      busyBtn(b, '');
+      if (r.err === 'done') { await pull(b); render(); return toast('حسابك اتفعّل. ادخل بالباسورد'); }
+      if (!r.ok) return toast(codeErr(r));
+      putUsers(r.users); audit('user', x.u, 'تفعيل الحساب', '', 'بكود الواتساب', curDay()); save(); render(); SYNC.run(false); return toast('اتفعّل حسابك. أهلاً ' + firstName(x.name));
+    }
     await pull($('[data-act=activate]'));
     const u = me(); if (!u) return render(); if (!isPending(u)) { render(); return toast('حسابك اتفعّل'); }
     const r = await useCode(u.u, 'act', k); if (r !== true) { if (r === CODE_BAD) wrongTry(); return toast(r); }
@@ -341,7 +409,7 @@
   const nReqs = () => isAdmin() ? pendingReqs().length : 0;
   function vUsers() {
     const reqs = pendingReqs(), q = latinDigits(V.q || '').trim().toLowerCase(), qd = digits(q), ua = u => esc(u.u);
-    let h = top('المستخدمين', `${Object.keys(S.users).length} حساب`, 'settings') + '<main class="wrap">';
+    let h = top('المستخدمين', `${Object.keys(S.users).length} حساب`, 'settings') + '<main class="wrap">' + devCard();
     if (reqs.length) {
       h += `<section class="sec"><h3>طلبات مستنية <small>${reqs.length}</small></h3>`;
       for (const x of reqs) {
@@ -392,8 +460,8 @@
     modal(`<h3>${p === 'act' ? 'كود التفعيل' : 'كود الباسورد الجديد'}</h3><p class="mute" style="margin-top:0">لـ ${esc(u.name)} · <bdi dir="ltr">${esc(u.phone)}</bdi></p><p class="bigcode" dir="ltr">${code}</p><p class="mute">ابعته له على الواتساب. الكود بيشتغل مرة واحدة، ولمدة 3 أيام.</p>${waA(u.phone, msg, 'ابعته على الواتساب', 'wide')}<div class="btns" style="margin-top:10px"><button class="btn" data-act="mclose">تمام</button></div>`);
   }
   function seedAdmin() { // the AG admin account is in the private seed, so it is there on every phone, also before the first sync
-    const A = SEED.admin; if (!A || !A.u || !A.ph) return; const x = S.users[A.u];
-    if (!x || (x._seed && (x.ph !== A.ph || x.phone !== A.phone))) S.users[A.u] = { u: A.u, name: A.name || 'AG admin', emp: '', phone: A.phone || '', ph: A.ph, at: A.at || 0, role: 'admin', st: 'ok', _seed: 1 };
+    const A = SEED.admin; if (!A || !A.u) return; const x = S.users[A.u];   // v0.6.35: no password hash in the seed (the sheet checks it); a known one stays
+    if (!x || (x._seed && ((A.ph && x.ph !== A.ph) || x.phone !== A.phone))) S.users[A.u] = { u: A.u, name: A.name || 'AG admin', emp: '', phone: A.phone || '', ph: A.ph || (x && x.ph) || '', at: A.at || 0, role: 'admin', st: 'ok', _seed: 1 };
   }
 
   // ---------------- home ----------------
@@ -404,6 +472,7 @@
       const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
       h += `<div class="banner info inst"><span>${ios ? 'عشان تثبّته على الآيفون: من Safari دوس زرار المشاركة <b>⬆</b> وبعدين <b>Add to Home Screen</b>.' : window.__installEvt ? 'تقدر تثبّت البرنامج على الكمبيوتر وتفتحه من أيقونة.' : 'تقدر تثبّته من قايمة Chrome أو Edge: <b>Install Hudhud</b>.'}</span>${!ios && window.__installEvt ? '<button class="btn sm pen" data-act="install">ثبّت</button>' : ''}<button class="ib3 xs" data-act="noinst" aria-label="اقفل">×</button></div>`;
     }
+    h += cardBanner();
     if (isAdmin()) { const n = nReqs(); if (n) h += `<button class="banner info wide" data-act="go" data-v="users">فيه ${n === 1 ? 'طلب' : n + ' طلبات'} من المستخدمين مستني${n === 1 ? '' : 'ة'} ردك ←</button>`; }
     if (canWells()) h += `<div class="card"><label class="lab">اليوم اللي بتشوفه <em>(المهندس والأدمن بس يقدروا يفتحوا أيام فاتت ويعدّلوها)</em></label><input class="in" type="date" id="vday" value="${d}" max="${curDay()}"></div>`;
     else if (d !== curDay()) VDAY = null;
@@ -969,7 +1038,7 @@
     S.seedPub = SEED.version; save();
   }
   // the private link: opens the web version already tied to the sheet
-  const webLink = () => WEB_URL + '#link=' + btoa(unescape(encodeURIComponent(JSON.stringify(Object.assign({ u: SYNC.url(), k: (window.CONFIG && CONFIG.syncKey) || '' }, window.CONFIG && CONFIG.syncMove && SYNC.url() === CONFIG.syncUrl ? { m: CONFIG.syncMove } : {}))))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const webLink = () => WEB_URL + '#link=' + btoa(unescape(encodeURIComponent(JSON.stringify(Object.assign({ u: SYNC.url() }, window.CONFIG && CONFIG.syncMove && SYNC.url() === CONFIG.syncUrl ? { m: CONFIG.syncMove } : {}))))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   // people the admin asked to remove before the delete button existed (by hash only)
   const GONE0 = ['58e77434de587e52'];
   // an alert when something new reaches the area this person works in
@@ -2018,6 +2087,49 @@
     if (v === 'pmail') pmFit();
   }
   let WAITING = false; // the waiting screen of a new account was shown
+  // this phone has no card yet (or the sheet asks for the password again): the person confirms the password once
+  function cardBanner() {
+    if (!window.SYNC || !me()) return ''; const st = SYNC.status(); if (!st.linked) return '';
+    const msg = `السلام عليكم، أنا ${me().name} على AG Survey (${S.me}).`;
+    if (st.auth === 'locked') return `<div class="banner bad">حسابك اتقفل بعد ${TRIES} محاولات غلط في الباسورد. الداتا محفوظة على الموبايل وهتتبعت أول ما الأدمن يفتح الحساب.${adminPhone() && !isAdmin() ? waA(adminPhone(), msg + '\nالحساب اتقفل، محتاج تفتحه.', 'كلّم الأدمن', 'sm') : ''}</div>`;
+    if (st.auth === 'stopped') return `<div class="banner bad">الموبايل ده متوقف من الأدمن، والداتا مش بتتبعت. ${adminPhone() && !isAdmin() ? waA(adminPhone(), msg + '\nالموبايل اتوقف، محتاج ترجّعه.', 'كلّم الأدمن', 'sm') : ''}</div>`;
+    if (st.card && !st.auth) return '';
+    return `<div class="card cardok"><h3 style="margin:0 0 6px">أكّد الباسورد مرة واحدة</h3><p class="mute" style="margin:0 0 8px">${st.auth === 'login' ? 'الداتا مش بتتبعت لحد ما تكتب الباسورد.' : 'عشان الأمان، الموبايل ده ياخد كارنيه خاص بيه من الشيت.'} محتاج نت.</p>${pinIn('cfp')}<button class="btn pen wide" data-act="cardok">تأكيد</button></div>`;
+  }
+  async function cardOk() {
+    const k = L.normNum((($('#cfp') || {}).value || '').trim()); if (!/^\d{4}$/.test(k)) return toast('الباسورد 4 أرقام');
+    const b = $('[data-act=cardok]'); busyBtn(b, 'بيتأكد من الشيت…'); let r;
+    try { r = await SYNC.authOp('login', { idf: S.me, pin: k }); } catch (e) { busyBtn(b, ''); return toast('مفيش نت. جرّب تاني لما يبقى فيه نت'); }
+    busyBtn(b, ''); const p = $('#cfp'); if (p) p.value = '';
+    if (r.ok) { putUsers(r.users); save(); render(); return toast('تمام، الموبايل ده بقى معاه كارنيه'); }
+    if (r.err === 'locked') return lockedBox(S.me);
+    if (r.err === 'pin') return toast('الباسورد غلط' + leftTxt(r.left));
+    if (r.err === 'nouser') return toast('الشيت لسه ميعرفش حسابك. جرّب تاني بعد شوية');
+    if (r.err === 'stopped') return toast('الموبايل ده متوقف من الأدمن');
+    return toast('مقدرش: ' + r.err);
+  }
+  // the admin: the devices that talk to the sheet, the locked accounts, the old shared key
+  function devCard() {
+    if (!SYNC.url()) return '';
+    const ai = SYNC.admInfo(), nm = u => (S.users[u] && S.users[u].name) || u;
+    if (!ai) return `<section class="sec"><h3>الأجهزة والدخول</h3><p class="mute">هتظهر هنا بعد ما تأكّد الباسورد على موبايلك ويتصل بالشيت.</p></section>`;
+    const devs = (ai.devs || []).slice().sort((a, b) => b.last - a.last), mine = S.sync && S.sync.dev, now = Date.now();
+    const old = devs.filter(d => d.old && d.st !== 'stop' && now - d.last < 30 * 864e5);
+    let h = `<section class="sec"><h3>الأجهزة والدخول <small>${devs.length}</small></h3>`;
+    h += (ai.locked || []).map(u => `<div class="urow"><div class="nm"><b>${esc(nm(u))}</b> <span class="tag bad">مقفول</span><small>${TRIES} محاولات غلط في الباسورد</small></div><div class="uact"><button class="btn sm pen" data-act="unlock" data-u="${esc(u)}">افتح الحساب</button></div></div>`).join('');
+    h += devs.map(d => `<div class="urow"><div class="nm"><b>${esc(d.users.map(nm).join('، ') || 'من غير اسم')}</b>${d.st === 'stop' ? ' <span class="tag bad">متوقف</span>' : d.old ? ' <span class="tag">من غير كارنيه</span>' : ''}${d.dev === mine ? ' <span class="tag">الموبايل ده</span>' : ''}<small>${d.app ? 'نسخة ' + esc(d.app) + ' · ' : ''}آخر اتصال من ${sinceTxt(d.last)}</small></div><div class="uact">${d.dev === mine ? '' : `<button class="btn sm" data-act="devst" data-d="${esc(d.dev)}" data-s="${d.st === 'stop' ? 'ok' : 'stop'}">${d.st === 'stop' ? 'رجّعه' : 'وقّفه'}</button>`}</div></div>`).join('');
+    h += `<div class="card" style="margin-top:8px"><b>الدخول القديم من غير كارنيه: ${ai.legacy ? 'مفتوح' : 'مقفول'}</b><p class="mute" style="margin:4px 0 8px">${ai.legacy ? (old.length ? `${old.length === 1 ? 'جهاز واحد لسه شغال' : old.length + ' أجهزة لسه شغالة'} من غير كارنيه. لما كله ياخد كارنيه اقفله.` : 'كل الأجهزة اللي اتصلت آخر شهر معاها كارنيه. تقدر تقفله.') : 'أي جهاز من غير كارنيه مش هيبعت ولا يستلم لحد ما صاحبه يكتب الباسورد.'}</p><button class="btn ${ai.legacy ? 'pen' : ''}" data-act="legacy" data-s="${ai.legacy ? 0 : 1}">${ai.legacy ? 'اقفل الدخول القديم' : 'افتحه تاني'}</button></div>`;
+    return h + `<p class="mute">الكارنيه بيتجدد لوحده كل شهر. الجهاز اللي يغيب 3 شهور لازم صاحبه يكتب الباسورد تاني.</p></section>`;
+  }
+  function devAct(b) {
+    const ai = SYNC.admInfo(), now = Date.now(), act = b.dataset.act;
+    if (act === 'unlock') { const u = b.dataset.u, nm = (S.users[u] && S.users[u].name) || u;
+      return confirmBox(`تفتح حساب ${nm}؟`, 'افتح', () => { S.locks = S.locks || {}; S.locks[u] = { on: 0, n: 0, t: now, by: S.me }; mark('lk|' + u); if (ai) ai.locked = (ai.locked || []).filter(x => x !== u); audit('user', u, 'فتح الحساب', 'مقفول', 'مفتوح', curDay()); save(); render(); SYNC.run(false); toast('اتفتح'); }); }
+    if (act === 'devst') { const d = b.dataset.d, stp = b.dataset.s === 'stop', v = ai && (ai.devs || []).find(x => x.dev === d), who = v ? v.users.map(u => (S.users[u] && S.users[u].name) || u).join('، ') : '';
+      return confirmBox(stp ? `توقّف موبايل ${who}؟ مش هيبعت ولا يستلم لحد ما ترجّعه.` : `ترجّع موبايل ${who}؟`, stp ? 'وقّفه' : 'رجّعه', () => { S.devst = S.devst || {}; S.devst[d] = { st: stp ? 'stop' : 'ok', t: now, by: S.me }; mark('dv|' + d); if (v) v.st = stp ? 'stop' : 'ok'; audit('user', d, 'جهاز', stp ? 'شغال' : 'متوقف', stp ? 'متوقف' : 'شغال', curDay(), who); save(); render(); SYNC.run(false); }); }
+    if (act === 'legacy') { const open = b.dataset.s === '1';
+      return confirmBox(open ? 'تفتح الدخول القديم من غير كارنيه تاني؟' : 'تقفل الدخول القديم؟ أي موبايل أو لينك من غير كارنيه مش هيبعت ولا يستلم لحد ما صاحبه يكتب الباسورد.', open ? 'افتحه' : 'اقفله', () => { S.sec = { legacy: open, t: now, by: S.me }; mark('sec'); if (ai) ai.legacy = open; audit('user', 'sec', 'الدخول القديم', open ? 'مقفول' : 'مفتوح', open ? 'مفتوح' : 'مقفول', curDay()); save(); render(); SYNC.run(false); }); }
+  }
   function go(v, extra) { V = Object.assign({ v }, extra || {}); render(); window.scrollTo(0, 0); }
 
   document.addEventListener('click', e => {
@@ -2135,6 +2247,8 @@
       case 'lupick': { const x = S.users[b.dataset.u]; if (!x) return; V.lu = x.u; const i = $('#lu'); if (i) i.value = x.u; const p = $('#lp'); if (p) p.focus(); return; }
       case 'loginas': { const u = b.dataset.u; if (!PICK || !PICK.has(u)) return closeModal(); return loginAs(u); }
       case 'activate': return doActivate();
+      case 'cardok': return cardOk();
+      case 'unlock': case 'devst': case 'legacy': return isAdmin() ? devAct(b) : null;
       case 'logout': if (FM) closeForm(); S.me = null; VDAY = null; save(); V = { v: 'home' }; return render();
       case 'pinchg': return pinBox();
       case 'pinok': return pinOk();
@@ -2365,6 +2479,8 @@
     for (const d in S.reps) if (d < L.addDays(curDay(), -60)) delete S.reps[d];
     delete S.admin; seedAdmin();
     SYNC.init({ getS: () => S, save, meta: syncMeta, onDone: syncDone, onGone, seedPart, onSeed, cutDay: () => L.addDays(curDay(), -60), version: VERSION, bgOn: () => !!BG(), before: bgTake });
+    // the web version: the person already logged in on the first screen (the sheet gave this computer its card)
+    if (window.CONFIG && CONFIG.web && Array.isArray(CONFIG.syncUsers) && CONFIG.syncUsers.length && !S.me && S.sync.tok === CONFIG.syncTok) { putUsers(CONFIG.syncUsers); S.me = CONFIG.syncUsers[0].u; S.ui.here = [...new Set([...(S.ui.here || []), S.me])]; save(); }
     for (const h of GONE0) if (!(S.gone && S.gone[h])) { const x = Object.keys(S.users).find(u => L.uhash(u) === h); if (x) { scrubUser(x); save(); } else { S.gone = S.gone || {}; S.gone[h] = 1; } } // a phone that never had the person only remembers the hash
     // forget "seen" marks of plan items older than a few days
     { const keep = new Set(); for (let i = 0; i < 4; i++) for (const a of SEED.areas) for (const x of planItems(L.addDays(curDay(), -i), a.id)) keep.add(x.it.id);
